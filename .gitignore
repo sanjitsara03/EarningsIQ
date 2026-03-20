@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 venv/
 cik_cache.json
+.claude/
