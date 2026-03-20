@@ -58,7 +58,7 @@ CREATE TABLE signals (
     segments            JSONB,          -- [{name, revenue, growth}, ...]
 
     -- things management called out as changing meaningfully
-    notable_changes     JSONB,          ß
+    notable_changes     JSONB,          
 
     -- risk signals pulled from the risk factors section
     risk_factors        JSONB,          

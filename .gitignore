@@ -6,3 +6,4 @@ __pycache__/
 venv/
 cik_cache.json
 .claude/
+PLAN.md
