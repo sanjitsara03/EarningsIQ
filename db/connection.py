@@ -1,5 +1,6 @@
 # Manages a psycopg2 connection pool backed by DATABASE_URL.
 # Use get_connection() as a context manager
+import os
 from contextlib import contextmanager
 
 import psycopg2
