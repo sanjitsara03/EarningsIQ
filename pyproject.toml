@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "edgartools>=5.25.1",
+    "psycopg2-binary>=2.9.11",
     "python-dotenv>=1.2.2",
     "requests>=2.32.5",
 ]
