@@ -143,6 +143,43 @@ def insert_risk_score(
         )
 
 
+# Returns filing IDs for a ticker and filing type, ordered by period descending. Used by the Comparison Agent.
+def get_filing_ids_for_ticker(conn: connection, ticker: str, filing_type: str, limit: int = 4) -> list[int]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id FROM filings
+            WHERE ticker = %s AND filing_type = %s
+            ORDER BY period DESC
+            LIMIT %s
+            """,
+            (ticker, filing_type, limit),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+# Returns signals rows for a list of filing IDs, joined with period and ticker for context.
+def get_signals_for_filings(conn: connection, filing_ids: list[int]) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT f.ticker, f.period, f.filing_type,
+                   s.revenue, s.eps, s.gross_margin, s.operating_margin,
+                   s.revenue_yoy_delta, s.guidance_revenue, s.guidance_withdrawn,
+                   s.segments, s.notable_changes
+            FROM signals s
+            JOIN filings f ON s.filing_id = f.id
+            WHERE s.filing_id = ANY(%s)
+            ORDER BY f.period DESC
+            """,
+            (filing_ids,),
+        )
+        cols = ["ticker", "period", "filing_type", "revenue", "eps", "gross_margin",
+                "operating_margin", "revenue_yoy_delta", "guidance_revenue",
+                "guidance_withdrawn", "segments", "notable_changes"]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
 # Advances a filing to the next pipeline status (e.g. pending → chunked → embedded → extracted → scored).
 def update_filing_status(conn: connection, filing_id: int, status: str) -> None:
     """Advance a filing to the next pipeline status."""
