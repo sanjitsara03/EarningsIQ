@@ -1,10 +1,19 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import clsx from 'clsx'
+import {
+  chat,
+  getSignals,
+  getRisk,
+  pollJob,
+  type AdviceResponse,
+  type SignalsData,
+  type RiskData,
+} from './api'
 
 // --- Types ---
 
-type Status = 'idle' | 'analyzing' | 'results'
+type Status = 'idle' | 'analyzing' | 'polling' | 'results'
 type Recommendation = 'BUY' | 'HOLD' | 'SELL'
 type RiskTier = 'LOW' | 'MEDIUM' | 'HIGH'
 
@@ -15,7 +24,8 @@ interface Metric {
   positive: boolean
 }
 
-interface AnalysisResult {
+interface AdviceResult {
+  kind: 'advice'
   company: string
   ticker: string
   period: string
@@ -31,37 +41,83 @@ interface AnalysisResult {
   disclaimer: string
 }
 
-// --- Mock data (replaced when backend is wired up) ---
-
-const MOCK_RESULT: AnalysisResult = {
-  company: 'Apple Inc.',
-  ticker: 'AAPL',
-  period: 'Q3 FY2024',
-  filingType: '10-Q',
-  recommendation: 'HOLD',
-  confidence: 'medium',
-  reasoning:
-    'Apple delivered solid Q3 results, with 6.1% revenue growth driven by a 14% surge in Services. Gross margins expanded 40 bps to 45.2%, and the iPhone installed base reached an all-time high. However, Greater China revenue declined 6.5% YoY amid sustained regulatory headwinds, and management offered no concrete AI monetization timeline. At current valuations, the stock is priced for sustained execution — a hold pending clarity on AI product revenue and a China recovery.',
-  metrics: [
-    { label: 'Revenue', value: '$94.9B', delta: '+6.1% YoY', positive: true },
-    { label: 'Diluted EPS', value: '$1.26', delta: '+11.0% YoY', positive: true },
-    { label: 'Gross Margin', value: '45.2%', delta: '+40 bps', positive: true },
-  ],
-  riskScore: 6.5,
-  riskTier: 'MEDIUM',
-  keyPositives: [
-    'Services revenue grew 14% YoY, now representing 28% of total revenue',
-    'Gross margin expanded 40 bps driven by favorable product and segment mix',
-    'iPhone installed base reached all-time high across all geographic segments',
-  ],
-  keyRisks: [
-    'Greater China revenue declined 6.5% YoY amid ongoing regulatory uncertainty',
-    'Mac and iPad revenues soft — upgrade cycles remain elongated post-pandemic',
-    'No concrete AI product revenue guidance issued for FY2025',
-  ],
-  disclaimer:
-    'This is not financial advice. Analysis is generated from SEC EDGAR 10-Q and 10-K filings.',
+interface TextResult {
+  kind: 'text'
+  answer: string
 }
+
+type ResultData = AdviceResult | TextResult
+
+// --- Formatters ---
+
+function fmtRevenue(v: number | null): string {
+  if (!v) return 'N/A'
+  if (v >= 1e12) return `$${(v / 1e12).toFixed(1)}T`
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`
+  return `$${v.toLocaleString()}`
+}
+
+function fmtDelta(v: number | null, suffix = '% YoY'): string {
+  if (v == null) return ''
+  return `${v >= 0 ? '+' : ''}${v.toFixed(1)}${suffix}`
+}
+
+function fmtPct(v: number | null): string {
+  if (v == null) return 'N/A'
+  return `${v.toFixed(1)}%`
+}
+
+function fmtEps(v: number | null): string {
+  if (v == null) return 'N/A'
+  return `$${v.toFixed(2)}`
+}
+
+// Builds the display result from advice + signals + risk API responses.
+function buildResult(
+  advice: AdviceResponse,
+  signals: SignalsData | null,
+  risk: RiskData | null,
+): AdviceResult {
+  const revenueYoY = signals?.revenue_yoy_delta ?? null
+  return {
+    kind: 'advice',
+    company: advice.ticker,
+    ticker: advice.ticker,
+    period: signals?.period ?? '',
+    filingType: signals?.filing_type ?? '10-Q',
+    recommendation: advice.recommendation.toUpperCase() as Recommendation,
+    confidence: advice.confidence,
+    reasoning: advice.reasoning,
+    metrics: [
+      {
+        label: 'Revenue',
+        value: fmtRevenue(signals?.revenue ?? null),
+        delta: fmtDelta(revenueYoY),
+        positive: (revenueYoY ?? 0) >= 0,
+      },
+      {
+        label: 'Diluted EPS',
+        value: fmtEps(signals?.eps ?? null),
+        delta: '',
+        positive: true,
+      },
+      {
+        label: 'Gross Margin',
+        value: fmtPct(signals?.gross_margin ?? null),
+        delta: '',
+        positive: true,
+      },
+    ],
+    riskScore: risk?.overall_score ?? 0,
+    riskTier: (risk?.risk_tier?.toUpperCase() ?? 'MEDIUM') as RiskTier,
+    keyPositives: advice.key_positives,
+    keyRisks: advice.key_risks,
+    disclaimer: advice.disclaimer,
+  }
+}
+
+// --- Constants ---
 
 const EXAMPLES = [
   'How did Apple do last quarter?',
@@ -71,11 +127,11 @@ const EXAMPLES = [
 ]
 
 const ANALYZING_STEPS = [
-  'Fetching SEC EDGAR filings',
-  'Parsing financial statements',
+  'Routing your query',
+  'Loading SEC filings',
   'Extracting key signals',
-  'Scoring risk components',
-  'Synthesizing advice',
+  'Assessing risk',
+  'Generating advice',
 ]
 
 // --- Color mappings ---
@@ -92,7 +148,18 @@ const RISK_STYLE: Record<RiskTier, { text: string; fill: string }> = {
   HIGH: { text: 'text-red-400', fill: 'bg-red-500' },
 }
 
-// --- Shared query input ---
+// --- Shared components ---
+
+function BrandMark({ pulse = false }: { pulse?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className={clsx('w-2 h-2 rounded-full bg-emerald-400', pulse && 'animate-pulse')} />
+      <span className="font-display font-semibold text-sm tracking-[0.15em] uppercase text-[#e2e8f0]">
+        EarningsAgentIQ
+      </span>
+    </div>
+  )
+}
 
 interface QueryInputProps {
   query: string
@@ -100,9 +167,10 @@ interface QueryInputProps {
   onSubmit: (q: string) => void
   autoFocus?: boolean
   compact?: boolean
+  disabled?: boolean
 }
 
-function QueryInput({ query, setQuery, onSubmit, autoFocus, compact }: QueryInputProps) {
+function QueryInput({ query, setQuery, onSubmit, autoFocus, compact, disabled }: QueryInputProps) {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     onSubmit(query)
@@ -117,7 +185,6 @@ function QueryInput({ query, setQuery, onSubmit, autoFocus, compact }: QueryInpu
           compact ? 'px-4 py-3' : 'px-5 py-4',
         )}
       >
-        {/* Search icon */}
         <svg
           className="shrink-0 text-muted"
           width={compact ? 15 : 17}
@@ -146,15 +213,16 @@ function QueryInput({ query, setQuery, onSubmit, autoFocus, compact }: QueryInpu
             compact ? 'text-sm' : 'text-base',
           )}
           autoFocus={autoFocus}
+          disabled={disabled}
         />
 
         <button
           type="submit"
-          disabled={!query.trim()}
+          disabled={!query.trim() || disabled}
           className={clsx(
             'shrink-0 rounded-xl font-body font-medium text-sm transition-all',
             compact ? 'px-3 py-1.5' : 'px-4 py-2',
-            query.trim()
+            query.trim() && !disabled
               ? 'bg-emerald-600 text-white hover:bg-emerald-500'
               : 'bg-[#2d3748] text-muted cursor-not-allowed',
           )}
@@ -166,33 +234,21 @@ function QueryInput({ query, setQuery, onSubmit, autoFocus, compact }: QueryInpu
   )
 }
 
-// --- Brand mark (shared) ---
-
-function BrandMark({ pulse = false }: { pulse?: boolean }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className={clsx('w-2 h-2 rounded-full bg-emerald-400', pulse && 'animate-pulse')} />
-      <span className="font-display font-semibold text-sm tracking-[0.15em] uppercase text-[#e2e8f0]">
-        EarningsAgentIQ
-      </span>
-    </div>
-  )
-}
-
 // --- Idle view ---
 
 function IdleView({
   query,
   setQuery,
   onSubmit,
+  errorMsg,
 }: {
   query: string
   setQuery: (q: string) => void
   onSubmit: (q: string) => void
+  errorMsg: string | null
 }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-16 animate-fade-in">
-      {/* Brand + tagline */}
       <div className="mb-10 flex flex-col items-center gap-3">
         <BrandMark />
         <p className="font-body text-muted text-center text-base max-w-sm leading-relaxed">
@@ -200,12 +256,13 @@ function IdleView({
         </p>
       </div>
 
-      {/* Query input */}
       <div className="w-full max-w-2xl">
         <QueryInput query={query} setQuery={setQuery} onSubmit={onSubmit} autoFocus />
+        {errorMsg && (
+          <p className="mt-3 font-body text-sm text-red-400 text-center">{errorMsg}</p>
+        )}
       </div>
 
-      {/* Example queries */}
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {EXAMPLES.map((ex) => (
           <button
@@ -218,7 +275,6 @@ function IdleView({
         ))}
       </div>
 
-      {/* Footer */}
       <p className="mt-16 font-body text-xs text-[#3d4a5c] tracking-wide">
         Powered by SEC EDGAR · 10-Q &amp; 10-K filings
       </p>
@@ -230,13 +286,13 @@ function IdleView({
 
 function AnalyzingView({ query }: { query: string }) {
   const [step, setStep] = useState(0)
+  const allDone = step >= ANALYZING_STEPS.length
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setStep((s) => Math.min(s + 1, ANALYZING_STEPS.length - 1))
-    }, 420)
-    return () => clearInterval(interval)
-  }, [])
+    if (allDone) return
+    const id = setInterval(() => setStep((s) => s + 1), 420)
+    return () => clearInterval(id)
+  }, [allDone])
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-16 gap-10 animate-fade-in">
@@ -249,7 +305,6 @@ function AnalyzingView({ query }: { query: string }) {
         </p>
       </div>
 
-      {/* Step-by-step progress */}
       <div className="flex flex-col gap-2.5 w-full max-w-xs">
         {ANALYZING_STEPS.map((s, i) => (
           <div
@@ -287,20 +342,100 @@ function AnalyzingView({ query }: { query: string }) {
           </div>
         ))}
       </div>
+
+      {allDone && (
+        <p className="font-body text-xs text-muted animate-pulse">Generating response…</p>
+      )}
     </div>
   )
 }
 
-// --- Results view ---
+// --- Polling view (slow path — first-time ingestion) ---
 
-function ResultsView({
+function PollingView({ ticker }: { ticker: string }) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const mins = Math.floor(elapsed / 60)
+  const secs = elapsed % 60
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-16 gap-8 animate-fade-in">
+      <BrandMark pulse />
+
+      <div className="text-center max-w-sm">
+        <p className="font-display font-semibold text-lg text-[#e2e8f0] mb-2">
+          First-time ingestion
+        </p>
+        <p className="font-body text-muted text-sm leading-relaxed">
+          We're fetching and processing {ticker}'s SEC filings for the first time. This usually
+          takes 2–3 minutes.
+        </p>
+      </div>
+
+      {/* Indeterminate progress bar */}
+      <div className="w-48 h-px bg-surface rounded-full overflow-hidden">
+        <div className="h-full bg-emerald-500 rounded-full animate-[indeterminate_1.8s_ease-in-out_infinite]" />
+      </div>
+
+      <p className="font-mono text-xs text-[#3d4a5c]">{timeStr}</p>
+    </div>
+  )
+}
+
+// --- Text result view (comparison / web) ---
+
+function TextResultView({
+  query,
+  answer,
+  onReset,
+  onResubmit,
+}: {
+  query: string
+  answer: string
+  onReset: () => void
+  onResubmit: (q: string) => void
+}) {
+  const [newQuery, setNewQuery] = useState('')
+
+  return (
+    <div className="min-h-screen px-6 py-8 max-w-4xl mx-auto animate-slide-up">
+      <div className="flex items-center justify-between mb-10">
+        <BrandMark />
+        <button
+          onClick={onReset}
+          className="font-body text-sm text-muted hover:text-[#e2e8f0] transition-colors border border-border rounded-lg px-3 py-1.5 hover:border-[#3d4a5c]"
+        >
+          New query
+        </button>
+      </div>
+
+      <p className="font-body text-[#3d4a5c] text-xs italic mb-8">&ldquo;{query}&rdquo;</p>
+
+      <p className="font-body text-sm text-muted leading-relaxed max-w-2xl mb-10">{answer}</p>
+
+      <div className="border-t border-border pt-8">
+        <QueryInput query={newQuery} setQuery={setNewQuery} onSubmit={onResubmit} compact />
+      </div>
+    </div>
+  )
+}
+
+// --- Advice result view ---
+
+function AdviceResultView({
   query,
   result,
   onReset,
   onResubmit,
 }: {
   query: string
-  result: AnalysisResult
+  result: AdviceResult
   onReset: () => void
   onResubmit: (q: string) => void
 }) {
@@ -311,7 +446,7 @@ function ResultsView({
 
   return (
     <div className="min-h-screen px-6 py-8 max-w-4xl mx-auto animate-slide-up">
-      {/* Header row */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-10">
         <BrandMark />
         <button
@@ -325,14 +460,15 @@ function ResultsView({
       {/* Company identifier */}
       <div className="mb-8">
         <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568]">
-          {result.company}&ensp;·&ensp;{result.ticker}&ensp;·&ensp;{result.period}&ensp;·&ensp;{result.filingType}
+          {result.ticker}
+          {result.period && <>&ensp;·&ensp;{result.period}</>}
+          {result.filingType && <>&ensp;·&ensp;{result.filingType}</>}
         </p>
         <p className="font-body text-[#3d4a5c] text-xs mt-1.5 italic">&ldquo;{query}&rdquo;</p>
       </div>
 
       {/* Recommendation + Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-8 sm:gap-14 items-start mb-10">
-        {/* Recommendation block */}
         <div>
           <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-2">
             Recommendation
@@ -345,7 +481,6 @@ function ResultsView({
           </p>
         </div>
 
-        {/* Metric columns */}
         <div className="grid grid-cols-3 gap-6 sm:pt-1">
           {result.metrics.map((m) => (
             <div key={m.label}>
@@ -355,14 +490,16 @@ function ResultsView({
               <p className="font-mono text-2xl font-medium text-[#f1f5f9] leading-none mb-1.5">
                 {m.value}
               </p>
-              <p
-                className={clsx(
-                  'font-body text-xs font-medium',
-                  m.positive ? 'text-emerald-400' : 'text-red-400',
-                )}
-              >
-                {m.delta}
-              </p>
+              {m.delta && (
+                <p
+                  className={clsx(
+                    'font-body text-xs font-medium',
+                    m.positive ? 'text-emerald-400' : 'text-red-400',
+                  )}
+                >
+                  {m.delta}
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -371,28 +508,34 @@ function ResultsView({
       <div className="border-t border-border mb-8" />
 
       {/* Risk score */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568]">Risk Score</p>
-          <div className="flex items-center gap-2.5">
-            <span className="font-mono text-sm text-[#e2e8f0]">{result.riskScore} / 10</span>
-            <span
-              className={clsx(
-                'font-mono text-xs tracking-widest uppercase font-medium',
-                riskStyle.text,
-              )}
-            >
-              {result.riskTier}
-            </span>
+      {result.riskScore > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568]">
+              Risk Score
+            </p>
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-sm text-[#e2e8f0]">
+                {result.riskScore.toFixed(1)} / 10
+              </span>
+              <span
+                className={clsx(
+                  'font-mono text-xs tracking-widest uppercase font-medium',
+                  riskStyle.text,
+                )}
+              >
+                {result.riskTier}
+              </span>
+            </div>
+          </div>
+          <div className="h-1.5 bg-surface rounded-full overflow-hidden">
+            <div
+              className={clsx('h-full rounded-full', riskStyle.fill)}
+              style={{ width: `${riskPct}%` }}
+            />
           </div>
         </div>
-        <div className="h-1.5 bg-surface rounded-full overflow-hidden">
-          <div
-            className={clsx('h-full rounded-full', riskStyle.fill)}
-            style={{ width: `${riskPct}%` }}
-          />
-        </div>
-      </div>
+      )}
 
       {/* Key positives + risks */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
@@ -426,7 +569,7 @@ function ResultsView({
 
       <div className="border-t border-border mb-8" />
 
-      {/* Analyst reasoning */}
+      {/* Reasoning */}
       <div className="mb-10">
         <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-3">
           Analyst Reasoning
@@ -454,30 +597,96 @@ function ResultsView({
 export default function App() {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<Status>('idle')
+  const [resultData, setResultData] = useState<ResultData | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [pollingTicker, setPollingTicker] = useState('')
 
-  const submit = (q: string) => {
+  // Fetches signals + risk and builds the full display result from an advice response.
+  const hydrateAdvice = async (advice: AdviceResponse) => {
+    const [signals, risk] = await Promise.all([
+      getSignals(advice.ticker),
+      getRisk(advice.ticker),
+    ])
+    setResultData(buildResult(advice, signals, risk))
+    setStatus('results')
+  }
+
+  const submit = async (q: string) => {
     if (!q.trim()) return
     setQuery(q)
     setStatus('analyzing')
-    setTimeout(() => setStatus('results'), 2200)
+    setErrorMsg(null)
+    setResultData(null)
+
+    try {
+      const chatRes = await chat(q)
+
+      // Slow path — data not yet in DB, pipeline enqueued
+      if (chatRes.type === 'queued') {
+        // Extract ticker from the message for the polling view
+        const ticker = chatRes.message.match(/Ingesting (\w+)/)?.[1] ?? ''
+        setPollingTicker(ticker)
+        setStatus('polling')
+        await pollJob(chatRes.job_id)
+        // Pipeline done — re-run as fast path
+        setStatus('analyzing')
+        const retry = await chat(q)
+        if (retry.type === 'advice') {
+          await hydrateAdvice(retry)
+        } else {
+          throw new Error('Unexpected response after pipeline completion.')
+        }
+        return
+      }
+
+      // Fast path — advice ready
+      if (chatRes.type === 'advice') {
+        await hydrateAdvice(chatRes)
+        return
+      }
+
+      // Comparison or web search — plain text answer
+      const answer = 'answer' in chatRes ? (chatRes.answer as string) : ''
+      setResultData({ kind: 'text', answer })
+      setStatus('results')
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      setStatus('idle')
+    }
+  }
+
+  const reset = () => {
+    setStatus('idle')
+    setQuery('')
+    setResultData(null)
+    setErrorMsg(null)
   }
 
   return (
     <div className="min-h-screen bg-[#0f1117] text-[#e2e8f0] font-body">
       {status === 'idle' && (
-        <IdleView query={query} setQuery={setQuery} onSubmit={submit} />
+        <IdleView query={query} setQuery={setQuery} onSubmit={submit} errorMsg={errorMsg} />
       )}
       {status === 'analyzing' && <AnalyzingView query={query} />}
-      {status === 'results' && (
-        <ResultsView
-          query={query}
-          result={MOCK_RESULT}
-          onReset={() => {
-            setStatus('idle')
-            setQuery('')
-          }}
-          onResubmit={submit}
-        />
+      {status === 'polling' && <PollingView ticker={pollingTicker} />}
+      {status === 'results' && resultData && (
+        <>
+          {resultData.kind === 'advice' ? (
+            <AdviceResultView
+              query={query}
+              result={resultData}
+              onReset={reset}
+              onResubmit={submit}
+            />
+          ) : (
+            <TextResultView
+              query={query}
+              answer={resultData.answer}
+              onReset={reset}
+              onResubmit={submit}
+            />
+          )}
+        </>
       )}
     </div>
   )
