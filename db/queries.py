@@ -1,5 +1,7 @@
 # Data access layer for the filings table.
 # All functions take a psycopg2 connection
+import json
+
 from psycopg2.extensions import connection
 
 
@@ -47,6 +49,47 @@ def get_filing_status(conn: connection, accession: str) -> str | None:
         )
         row = cur.fetchone()
         return row[0] if row else None
+
+
+# Fetches all chunks for a filing ordered by chunk_index. Returns list of dicts with section and content.
+def get_chunks_for_filing(conn: connection, filing_id: int) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT section, content FROM chunks WHERE filing_id = %s ORDER BY chunk_index",
+            (filing_id,),
+        )
+        return [{"section": row[0], "content": row[1]} for row in cur.fetchall()]
+
+
+# Inserts extracted signals into the signals table. JSONB fields are serialized from Python objects.
+def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
+    fm = results.get("extract_financial_metrics", {})
+    outlook = results.get("extract_management_outlook", {})
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO signals (
+                filing_id,
+                revenue, eps, gross_margin, operating_margin, revenue_yoy_delta,
+                guidance_revenue, guidance_period, guidance_withdrawn,
+                segments, notable_changes, risk_factors
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                filing_id,
+                fm.get("revenue"),
+                fm.get("eps"),
+                fm.get("gross_margin"),
+                fm.get("operating_margin"),
+                fm.get("revenue_yoy_delta"),
+                outlook.get("guidance_revenue"),
+                outlook.get("guidance_period"),
+                outlook.get("withdrawn"),
+                json.dumps(results.get("extract_segment_performance")),
+                json.dumps(results.get("extract_notable_changes")),
+                json.dumps(results.get("extract_risk_factors")),
+            ),
+        )
 
 
 # Advances a filing to the next pipeline status (e.g. pending → chunked → embedded → extracted → scored).
