@@ -1,5 +1,6 @@
 # Manages a psycopg2 connection pool backed by DATABASE_URL.
-# Use get_connection() as a context manager
+# Pool is lazily initialized on first use so RQ work-horse subprocesses
+# create their own pool after fork rather than inheriting open sockets.
 import os
 from contextlib import contextmanager
 
@@ -9,16 +10,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_pool = psycopg2.pool.SimpleConnectionPool(
-    minconn=1,
-    maxconn=10,
-    dsn=os.environ["DATABASE_URL"],
-)
+_pool = None
+
+
+# Returns the pool, creating it on first call (after any fork).
+def _get_pool():
+    global _pool
+    if _pool is None:
+        _pool = psycopg2.pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dsn=os.environ["DATABASE_URL"],
+        )
+    return _pool
 
 
 @contextmanager
 def get_connection():
-    conn = _pool.getconn()
+    conn = _get_pool().getconn()
     try:
         yield conn
         conn.commit()
@@ -26,4 +35,4 @@ def get_connection():
         conn.rollback()
         raise
     finally:
-        _pool.putconn(conn)
+        _get_pool().putconn(conn)
