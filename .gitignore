@@ -8,3 +8,5 @@ cik_cache.json
 .claude/
 PLAN.md
 CLAUDE.md
+known_bugs.txt
+requirements.txt

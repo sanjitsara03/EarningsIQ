@@ -1,5 +1,0 @@
-~~frontend displaying wrong ingested file. ex- using appl 10K but showing 10Q.~~ FIXED
-Errors with searcbing for ETF in sec filings.
-~~web search display doesnt look good.~~ FIXED
-Comparison agent doesnt work.
-Revenue and eps doesnt get displayed on frontend sometimes.
