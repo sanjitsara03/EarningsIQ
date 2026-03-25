@@ -5,12 +5,21 @@ set -e
 echo "Running schema migration..."
 uv run python -c "
 import os, psycopg2
+
 conn = psycopg2.connect(os.environ['DATABASE_URL'])
 conn.autocommit = True
 cur = conn.cursor()
-cur.execute(open('schema.sql').read())
+
+cur.execute(\"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'filings');\")
+exists = cur.fetchone()[0]
+
+if not exists:
+    cur.execute(open('schema.sql').read())
+    print('Migration complete.')
+else:
+    print('Tables already exist, skipping.')
+
 conn.close()
-print('Migration complete.')
 "
 
 echo "Starting server..."
