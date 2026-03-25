@@ -38,7 +38,12 @@ export interface WebResponse {
   answer: string
 }
 
-export type ChatResponse = AdviceResponse | QueuedResponse | ComparisonResponse | WebResponse
+export interface ErrorResponse {
+  type: 'error'
+  message: string
+}
+
+export type ChatResponse = AdviceResponse | QueuedResponse | ComparisonResponse | WebResponse | ErrorResponse
 
 export interface SignalsData {
   ticker: string

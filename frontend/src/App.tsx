@@ -638,6 +638,13 @@ export default function App() {
     try {
       const chatRes = await chat(q)
 
+      // Backend error (no ticker detected, ticker not in EDGAR, etc.)
+      if (chatRes.type === 'error') {
+        setErrorMsg(chatRes.message)
+        setStatus('idle')
+        return
+      }
+
       // Slow path — data not yet in DB, pipeline enqueued
       if (chatRes.type === 'queued') {
         // Extract ticker from the message for the polling view

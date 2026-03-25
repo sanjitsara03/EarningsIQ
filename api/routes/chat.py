@@ -12,6 +12,7 @@ from agents.web_search import run_web_search
 from api.tasks import ticker_is_ready
 from db.connection import get_connection
 from db.queries import get_filing_ids_for_ticker, get_signals_for_filings
+from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 router = APIRouter()
 
@@ -67,8 +68,24 @@ def chat(body: ChatRequest, request: Request):
         result = run_comparison(body.query)
         return {"type": "comparison", **result}
 
+    # Guard: no ticker detected — ask user to specify a company.
+    if not ticker:
+        return {"type": "error", "message": "Please mention a specific publicly traded company (e.g. Apple, MSFT, Tesla)."}
+
     # Check if ticker data is ready in DB
     if not ticker_is_ready(ticker, filing_type):
+        # Pre-check EDGAR before enqueuing a long pipeline job — avoids 2-minute wait for ETFs/invalid tickers.
+        try:
+            cik = get_cik(ticker)
+            filings = get_10q_filings(cik, limit=1) if filing_type == "10-Q" else get_10k_filings(cik, limit=1)
+        except ValueError:
+            return {"type": "error", "message": f"'{ticker}' was not found in SEC EDGAR. Please check the ticker and try again."}
+
+        if not filings:
+            # ETF, index fund, or non-filing entity — fall back to web search.
+            summary = run_web_search(body.query)
+            return {"type": "web", "answer": f"Note: {ticker} does not file {filing_type} reports (it may be an ETF or index fund). Here's what I found via web search:\n\n{summary}"}
+
         from api.tasks import run_full_pipeline
         job = request.app.state.queue.enqueue(
             run_full_pipeline,
