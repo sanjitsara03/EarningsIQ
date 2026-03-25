@@ -15,6 +15,7 @@ dependencies = [
     "redis>=7.4.0",
     "requests>=2.32.5",
     "rq>=2.7.0",
+    "slowapi>=0.1.9",
     "tavily-python>=0.7.23",
     "uvicorn>=0.42.0",
 ]

@@ -7,12 +7,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
 from rq import Queue
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from api.routes import chat, ingest, jobs, risk, signals
 
 load_dotenv()
 
+# Rate limiter keyed by IP address.
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="EarningsAgentIQ", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Allow requests from the Vite dev server and future Vercel deployment.
 app.add_middleware(
