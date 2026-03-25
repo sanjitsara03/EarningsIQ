@@ -4,10 +4,6 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from rq.job import Job
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
@@ -25,7 +21,6 @@ class JobResponse(BaseModel):
 
 # Enqueues a full pipeline job (ingest → extraction → risk scoring) for the given ticker.
 @router.post("/ingest", response_model=JobResponse)
-@limiter.limit("5/minute")
 def enqueue_ingest(body: IngestRequest, request: Request):
     from api.tasks import run_full_pipeline
     job = request.app.state.queue.enqueue(

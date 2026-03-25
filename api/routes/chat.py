@@ -4,10 +4,6 @@
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
 
 from agents.advice import run_advice
 from agents.comparison import is_comparison_query, run_comparison
@@ -49,7 +45,6 @@ def _load_context(ticker: str, filing_type: str) -> tuple[dict, dict]:
 
 
 @router.post("/chat")
-@limiter.limit("10/minute")
 def chat(body: ChatRequest, request: Request):
     # Skip orchestrator if ticker and filing_type are already known (e.g. retry after pipeline job).
     if body.ticker and body.filing_type:
