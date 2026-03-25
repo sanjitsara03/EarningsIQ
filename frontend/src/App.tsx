@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import clsx from 'clsx'
+import ReactMarkdown from 'react-markdown'
 import {
   chat,
   getSignals,
@@ -417,7 +418,23 @@ function TextResultView({
 
       <p className="font-body text-[#3d4a5c] text-xs italic mb-8">&ldquo;{query}&rdquo;</p>
 
-      <p className="font-body text-sm text-muted leading-relaxed max-w-2xl mb-10">{answer}</p>
+      <div className="max-w-2xl mb-10">
+        <ReactMarkdown
+          components={{
+            p: ({ children }) => <p className="font-body text-sm text-muted leading-relaxed mb-4">{children}</p>,
+            strong: ({ children }) => <strong className="text-[#e2e8f0] font-semibold">{children}</strong>,
+            ul: ({ children }) => <ul className="list-disc pl-5 flex flex-col gap-1.5 mb-4">{children}</ul>,
+            ol: ({ children }) => <ol className="list-decimal pl-5 flex flex-col gap-1.5 mb-4">{children}</ol>,
+            li: ({ children }) => <li className="font-body text-sm text-muted leading-relaxed">{children}</li>,
+            a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">{children}</a>,
+            h1: ({ children }) => <h1 className="font-display font-semibold text-[#e2e8f0] text-lg mb-2 mt-4">{children}</h1>,
+            h2: ({ children }) => <h2 className="font-display font-semibold text-[#e2e8f0] text-base mb-2 mt-4">{children}</h2>,
+            h3: ({ children }) => <h3 className="font-display font-semibold text-[#e2e8f0] text-sm mb-2 mt-4">{children}</h3>,
+          }}
+        >
+          {answer}
+        </ReactMarkdown>
+      </div>
 
       <div className="border-t border-border pt-8">
         <QueryInput query={newQuery} setQuery={setNewQuery} onSubmit={onResubmit} compact />
