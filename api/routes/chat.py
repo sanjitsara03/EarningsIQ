@@ -18,6 +18,8 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     query: str
+    ticker: str | None = None
+    filing_type: str | None = None
 
 
 # Loads the most recent signals and risk score for a ticker from the DB.
@@ -43,10 +45,17 @@ def _load_context(ticker: str, filing_type: str) -> tuple[dict, dict]:
 
 @router.post("/chat")
 def chat(body: ChatRequest, request: Request):
-    intent = run_orchestrator(body.query)
-    ticker = intent.get("ticker", "").upper()
-    filing_type = intent["filing_types"][0] if intent.get("filing_types") else "10-Q"
-    intent_type = intent.get("intent")
+    # Skip orchestrator if ticker and filing_type are already known (e.g. retry after pipeline job).
+    if body.ticker and body.filing_type:
+        ticker = body.ticker.upper()
+        filing_type = body.filing_type
+        intent = {"intent": "single_analysis", "ticker": ticker, "filing_types": [filing_type], "periods_needed": 1, "web_search_needed": False}
+        intent_type = "single_analysis"
+    else:
+        intent = run_orchestrator(body.query)
+        ticker = intent.get("ticker", "").upper()
+        filing_type = intent["filing_types"][0] if intent.get("filing_types") else "10-Q"
+        intent_type = intent.get("intent")
 
     # Web-only
     if intent_type == "web_only":
@@ -68,11 +77,11 @@ def chat(body: ChatRequest, request: Request):
             intent.get("periods_needed", 1),
             job_timeout=600,
         )
-        return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status."}
+        return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type}
 
     # Fast path — data exists, run advice
     extracted_signals, risk_result = _load_context(ticker, filing_type)
     web_summary = run_web_search(body.query) if intent.get("web_search_needed") else None
     advice = run_advice(ticker, extracted_signals, risk_result, web_summary)
 
-    return {"type": "advice", "ticker": ticker, **advice.model_dump()}
+    return {"type": "advice", "ticker": ticker, "filing_type": filing_type, **advice.model_dump()}

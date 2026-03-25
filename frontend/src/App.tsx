@@ -621,7 +621,7 @@ export default function App() {
   // Fetches signals + risk and builds the full display result from an advice response.
   const hydrateAdvice = async (advice: AdviceResponse) => {
     const [signals, risk] = await Promise.all([
-      getSignals(advice.ticker),
+      getSignals(advice.ticker, advice.filing_type),
       getRisk(advice.ticker),
     ])
     setResultData(buildResult(advice, signals, risk))
@@ -645,9 +645,9 @@ export default function App() {
         setPollingTicker(ticker)
         setStatus('polling')
         await pollJob(chatRes.job_id)
-        // Pipeline done — re-run as fast path
+        // Pipeline done — re-run as fast path, bypassing the orchestrator with known ticker/filing_type.
         setStatus('analyzing')
-        const retry = await chat(q)
+        const retry = await chat(q, { ticker: chatRes.ticker, filing_type: chatRes.filing_type })
         if (retry.type === 'advice') {
           await hydrateAdvice(retry)
         } else {

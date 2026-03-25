@@ -9,6 +9,7 @@ const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
 export interface AdviceResponse {
   type: 'advice'
   ticker: string
+  filing_type: string
   recommendation: 'buy' | 'hold' | 'sell'
   confidence: 'high' | 'medium' | 'low'
   reasoning: string
@@ -22,6 +23,8 @@ export interface QueuedResponse {
   job_id: string
   status: string
   message: string
+  ticker: string
+  filing_type: string
 }
 
 export interface ComparisonResponse {
@@ -72,11 +75,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // POST /chat — main query endpoint. Returns one of 4 response types.
-export function chat(query: string): Promise<ChatResponse> {
+// Pass hint to skip the orchestrator when ticker/filing_type are already known (e.g. after pipeline retry).
+export function chat(query: string, hint?: { ticker: string; filing_type: string }): Promise<ChatResponse> {
   return request<ChatResponse>('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, ...hint }),
   })
 }
 
@@ -86,9 +90,9 @@ export function getJobStatus(jobId: string): Promise<JobStatus> {
 }
 
 // GET /signals/{ticker} — returns the most recent extracted signals.
-export async function getSignals(ticker: string): Promise<SignalsData | null> {
+export async function getSignals(ticker: string, filingType = '10-Q'): Promise<SignalsData | null> {
   try {
-    const data = await request<{ ticker: string; signals: SignalsData[] }>(`/signals/${ticker}`)
+    const data = await request<{ ticker: string; signals: SignalsData[] }>(`/signals/${ticker}?filing_type=${filingType}`)
     return data.signals?.[0] ?? null
   } catch {
     return null
