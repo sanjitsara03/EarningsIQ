@@ -232,6 +232,7 @@ name = "earningsagentiq"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiofiles" },
     { name = "anthropic" },
     { name = "edgartools" },
     { name = "fastapi" },
@@ -249,6 +250,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "anthropic", specifier = ">=0.86.0" },
     { name = "edgartools", specifier = ">=5.25.1" },
     { name = "fastapi", specifier = ">=0.135.2" },
