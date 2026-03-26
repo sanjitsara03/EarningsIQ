@@ -24,16 +24,19 @@ def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) ->
         filing_ids = get_filing_ids_for_ticker(conn, ticker, filing_type, limit=limit)
 
     results = []
-    for filing_id in filing_ids:
+    for i, filing_id in enumerate(filing_ids):
         logger.info(f"Running extraction for filing_id={filing_id}")
         extracted = run_extraction(filing_id)
 
         if filing_type == "10-K":
-            time.sleep(60)  # 10-K prompts are large enough to hit the 30k TPM limit
+            time.sleep(60)  # wait for TPM window to reset before risk scoring
         logger.info(f"Running risk scoring for filing_id={filing_id}")
         risk = run_risk_scoring(filing_id, ticker, extracted)
 
         results.append({"filing_id": filing_id, "risk_tier": risk["risk_tier"], "overall_score": risk["overall_score"]})
+
+        if filing_type == "10-K" and i < len(filing_ids) - 1:
+            time.sleep(60)  # wait before next filing's extraction to avoid TPM stacking
 
     logger.info(f"Pipeline complete for {ticker}: {results}")
     return {"ticker": ticker, "filings_processed": results}
