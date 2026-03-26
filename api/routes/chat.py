@@ -51,7 +51,7 @@ def chat(body: ChatRequest, request: Request):
         ticker = body.ticker.upper()
         filing_type = body.filing_type
         intent = {"intent": "single_analysis", "ticker": ticker, "filing_types": [filing_type], "periods_needed": 1, "web_search_needed": False}
-        intent_type = "single_analysis"
+        intent_type = "comparison" if is_comparison_query(body.query) else "single_analysis"
     else:
         intent = run_orchestrator(body.query)
         ticker = intent.get("ticker", "").upper()
@@ -65,6 +65,30 @@ def chat(body: ChatRequest, request: Request):
 
     # Comparison query — uses vector search + structured signals
     if intent_type == "comparison" and is_comparison_query(body.query):
+        if not ticker:
+            return {"type": "error", "message": "Please mention a specific publicly traded company (e.g. Apple, MSFT, Tesla)."}
+
+        if not ticker_is_ready(ticker, filing_type):
+            try:
+                cik = get_cik(ticker)
+                filings = get_10q_filings(cik, limit=1) if filing_type == "10-Q" else get_10k_filings(cik, limit=1)
+            except ValueError:
+                return {"type": "error", "message": f"'{ticker}' was not found in SEC EDGAR. Please check the ticker and try again."}
+
+            if not filings:
+                summary = run_web_search(body.query)
+                return {"type": "web", "answer": f"Note: {ticker} does not file {filing_type} reports (it may be an ETF or index fund). Here's what I found via web search:\n\n{summary}"}
+
+            from api.tasks import run_full_pipeline
+            job = request.app.state.queue.enqueue(
+                run_full_pipeline,
+                ticker,
+                filing_type,
+                intent.get("periods_needed", 1),
+                job_timeout=600,
+            )
+            return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type}
+
         result = run_comparison(body.query)
         return {"type": "comparison", **result}
 
