@@ -658,7 +658,9 @@ export default function App() {
         if (retry.type === 'advice') {
           await hydrateAdvice(retry)
         } else {
-          throw new Error('Unexpected response after pipeline completion.')
+          const answer = 'answer' in retry ? (retry.answer as string) : ''
+          setResultData({ kind: 'text', answer })
+          setStatus('results')
         }
         return
       }
