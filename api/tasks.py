@@ -3,6 +3,7 @@
 # run_full_pipeline chains ingest → extraction → risk scoring for a ticker that isn't in the DB yet.
 
 import logging
+import time
 
 from agents.extraction import run_extraction
 from agents.risk_scoring import run_risk_scoring
@@ -27,6 +28,8 @@ def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) ->
         logger.info(f"Running extraction for filing_id={filing_id}")
         extracted = run_extraction(filing_id)
 
+        if filing_type == "10-K":
+            time.sleep(60)  # 10-K prompts are large enough to hit the 30k TPM limit
         logger.info(f"Running risk scoring for filing_id={filing_id}")
         risk = run_risk_scoring(filing_id, ticker, extracted)
 
