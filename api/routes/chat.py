@@ -3,7 +3,7 @@
 # Slow path: if data is missing, enqueues the full pipeline and returns a job_id to poll.
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agents.advice import run_advice
 from agents.comparison import is_comparison_query, run_comparison
@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str = Field(max_length=500)
     ticker: str | None = None
     filing_type: str | None = None
 
