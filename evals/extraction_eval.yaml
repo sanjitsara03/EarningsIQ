@@ -1,0 +1,41 @@
+description: Extraction agent eval — requires pre-ingested tickers in local DB
+outputPath: evals/output/extraction_results.json
+
+providers:
+  - id: "python:extraction_provider.py"
+    config:
+      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+
+prompts:
+  - "{{ticker}}"
+
+tests:
+  - vars:
+      ticker: "MSFT"
+      filing_type: "10-Q"
+    assert:
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return o.revenue !== undefined || o.revenue === null
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return Array.isArray(o.risk_factors) || o.risk_factors === null
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return o.gross_margin !== undefined || o.gross_margin === null
+
+  - vars:
+      ticker: "NVDA"
+      filing_type: "10-Q"
+    assert:
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return o.revenue !== undefined || o.revenue === null
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return Array.isArray(o.segments) || o.segments === null

@@ -1,0 +1,35 @@
+description: Comparison agent eval — requires multiple filings ingested in local DB
+outputPath: evals/output/comparison_results.json
+
+providers:
+  - id: "python:comparison_provider.py"
+    config:
+      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: "How has MSFT revenue changed year over year?"
+    assert:
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return typeof o.answer === 'string' && o.answer.length > 50
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return Array.isArray(o.citations) && o.citations.length > 0
+      - type: llm-rubric
+        value: "The answer discusses Microsoft revenue trends across multiple periods with specific data points"
+
+  - vars:
+      query: "What is the YoY change in NVDA gross margin?"
+    assert:
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return typeof o.answer === 'string' && o.answer.length > 50
+      - type: llm-rubric
+        value: "The answer discusses NVIDIA gross margin changes with specific numbers or percentages"

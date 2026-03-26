@@ -1,0 +1,35 @@
+description: Web Search agent eval
+outputPath: evals/output/web_search_results.json
+
+providers:
+  - id: "python:web_search_provider.py"
+    config:
+      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+
+prompts:
+  - "{{query}}"
+
+tests:
+  - vars:
+      query: "What is the latest news about Apple?"
+    assert:
+      - type: llm-rubric
+        value: "The output contains relevant, recent information about Apple as a company"
+      - type: javascript
+        value: "output.length > 100"
+
+  - vars:
+      query: "What are analysts saying about NVIDIA stock?"
+    assert:
+      - type: llm-rubric
+        value: "The output contains analyst opinions or sentiment about NVIDIA"
+      - type: javascript
+        value: "output.length > 100"
+
+  - vars:
+      query: "What is Microsoft's current stock price?"
+    assert:
+      - type: llm-rubric
+        value: "The output attempts to answer a question about Microsoft's stock price or valuation"
+      - type: javascript
+        value: "output.length > 50"

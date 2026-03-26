@@ -1,0 +1,64 @@
+description: Advice agent eval — uses mock signals and risk data, no DB needed
+outputPath: evals/output/advice_results.json
+
+providers:
+  - id: "python:advice_provider.py"
+    config:
+      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+
+prompts:
+  - "{{ticker}}"
+
+tests:
+  # Strong signals → should lean buy or hold
+  - vars:
+      ticker: "AAPL"
+      extracted_signals: >
+        {"revenue": 94930000000, "eps": 1.64, "gross_margin": 46.9,
+         "operating_margin": 31.5, "revenue_yoy_delta": 4.0,
+         "guidance_revenue": 96000000000, "guidance_period": "Q1 2025",
+         "guidance_withdrawn": false,
+         "risk_factors": [{"category": "macro", "label": "FX headwinds", "severity": "low"}],
+         "segments": [{"name": "iPhone", "revenue": 69143000000, "growth": 5.5}],
+         "notable_changes": [{"metric": "Services revenue", "direction": "up", "magnitude": "12%"}]}
+      risk_result: >
+        {"overall_score": 3.5, "risk_tier": "low",
+         "executive_summary": "Apple shows strong fundamentals with growing services revenue and stable margins."}
+    assert:
+      - type: javascript
+        value: "['buy', 'hold', 'sell'].includes(JSON.parse(output).recommendation)"
+      - type: javascript
+        value: "['high', 'medium', 'low'].includes(JSON.parse(output).confidence)"
+      - type: javascript
+        value: "JSON.parse(output).reasoning.length > 50"
+      - type: javascript
+        value: "JSON.parse(output).key_risks.length >= 1"
+      - type: javascript
+        value: "JSON.parse(output).key_positives.length >= 1"
+      - type: javascript
+        value: "JSON.parse(output).disclaimer === 'This is not financial advice.'"
+      - type: llm-rubric
+        value: "Given strong revenue growth, low risk score of 3.5, and growing services, the recommendation should be buy or hold"
+
+  # Weak signals → should lean sell or hold
+  - vars:
+      ticker: "TSLA"
+      extracted_signals: >
+        {"revenue": 21301000000, "eps": 0.27, "gross_margin": 14.9,
+         "operating_margin": 1.2, "revenue_yoy_delta": -9.0,
+         "guidance_revenue": null, "guidance_period": null,
+         "guidance_withdrawn": true,
+         "risk_factors": [{"category": "competitive", "label": "EV price war", "severity": "high"},
+                          {"category": "demand", "label": "Weakening demand", "severity": "high"}],
+         "segments": [{"name": "Automotive", "revenue": 17378000000, "growth": -13.0}],
+         "notable_changes": [{"metric": "Margins", "direction": "down", "magnitude": "significant"}]}
+      risk_result: >
+        {"overall_score": 7.8, "risk_tier": "high",
+         "executive_summary": "Tesla faces significant demand headwinds, margin compression, and withdrawn guidance."}
+    assert:
+      - type: javascript
+        value: "['buy', 'hold', 'sell'].includes(JSON.parse(output).recommendation)"
+      - type: javascript
+        value: "JSON.parse(output).disclaimer === 'This is not financial advice.'"
+      - type: llm-rubric
+        value: "Given declining revenue, withdrawn guidance, high risk score of 7.8, the recommendation should lean hold or sell"

@@ -1,0 +1,41 @@
+description: Risk Scoring agent eval — requires pre-extracted tickers in local DB
+outputPath: evals/output/risk_scoring_results.json
+
+providers:
+  - id: "python:risk_scoring_provider.py"
+    config:
+      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+
+prompts:
+  - "{{ticker}}"
+
+tests:
+  - vars:
+      ticker: "MSFT"
+      filing_type: "10-Q"
+    assert:
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return typeof o.overall_score === 'number' && o.overall_score >= 1 && o.overall_score <= 10
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return ['low', 'medium', 'high'].includes(o.risk_tier)
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return typeof o.executive_summary === 'string' && o.executive_summary.length > 20
+
+  - vars:
+      ticker: "NVDA"
+      filing_type: "10-Q"
+    assert:
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return typeof o.overall_score === 'number' && o.overall_score >= 1 && o.overall_score <= 10
+      - type: javascript
+        value: |
+          const o = JSON.parse(output);
+          return ['low', 'medium', 'high'].includes(o.risk_tier)

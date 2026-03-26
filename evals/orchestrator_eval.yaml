@@ -1,0 +1,80 @@
+description: Orchestrator intent routing eval
+outputPath: evals/output/orchestrator_results.json
+
+providers:
+  - id: "python:orchestrator_provider.py"
+    config:
+      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+
+prompts:
+  - "{{query}}"
+
+tests:
+  # Single analysis — quarterly
+  - vars:
+      query: "How did Apple do last quarter?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'single_analysis'"
+      - type: javascript
+        value: "JSON.parse(output).ticker === 'AAPL'"
+      - type: javascript
+        value: "JSON.parse(output).filing_types.includes('10-Q')"
+
+  # Single analysis — annual risks
+  - vars:
+      query: "What are Microsoft's long-term risks?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'single_analysis'"
+      - type: javascript
+        value: "JSON.parse(output).ticker === 'MSFT'"
+      - type: javascript
+        value: "JSON.parse(output).filing_types.includes('10-K')"
+
+  # Advice intent
+  - vars:
+      query: "Should I buy Tesla stock?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'advice'"
+      - type: javascript
+        value: "JSON.parse(output).ticker === 'TSLA'"
+
+  # Comparison intent
+  - vars:
+      query: "How has NVIDIA's revenue trended over the last 4 quarters?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'comparison'"
+      - type: javascript
+        value: "JSON.parse(output).ticker === 'NVDA'"
+      - type: javascript
+        value: "JSON.parse(output).periods_needed >= 4"
+
+  # Web only
+  - vars:
+      query: "What is Apple's stock price today?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'web_only'"
+      - type: javascript
+        value: "JSON.parse(output).web_search_needed === true"
+
+  # No ticker — should still parse without crashing
+  - vars:
+      query: "What is the S&P 500 doing?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'web_only'"
+
+  # Advice needs both filing types
+  - vars:
+      query: "Is Amazon a good long-term investment?"
+    assert:
+      - type: javascript
+        value: "JSON.parse(output).intent === 'advice'"
+      - type: javascript
+        value: "JSON.parse(output).ticker === 'AMZN'"
+      - type: javascript
+        value: "JSON.parse(output).filing_types.includes('10-Q') && JSON.parse(output).filing_types.includes('10-K')"
