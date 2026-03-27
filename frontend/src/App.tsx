@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
-import { Show, SignInButton, UserButton } from '@clerk/react'
+import { useAuth, SignInButton, UserButton } from '@clerk/react'
 import {
   chat,
   getSignals,
@@ -613,6 +613,7 @@ function AdviceResultView({
 // --- Root app ---
 
 export default function App() {
+  const { isSignedIn, isLoaded } = useAuth()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [resultData, setResultData] = useState<ResultData | null>(null)
@@ -689,53 +690,56 @@ export default function App() {
     setErrorMsg(null)
   }
 
+  if (!isLoaded) return null
+
+  if (!isSignedIn) {
+    return (
+      <div className="min-h-screen bg-[#0f1117] text-[#e2e8f0] font-body flex flex-col items-center justify-center gap-6">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-400" />
+          <span className="font-display font-semibold text-sm tracking-[0.15em] uppercase text-[#e2e8f0]">
+            EarningsAgentIQ
+          </span>
+        </div>
+        <p className="text-[#94a3b8] text-sm">Sign in to continue</p>
+        <SignInButton>
+          <button className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-medium transition-colors">
+            Sign in
+          </button>
+        </SignInButton>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#0f1117] text-[#e2e8f0] font-body">
-      <Show when="signed-out">
-        <div className="flex flex-col items-center justify-center min-h-screen gap-6">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span className="font-display font-semibold text-sm tracking-[0.15em] uppercase text-[#e2e8f0]">
-              EarningsAgentIQ
-            </span>
-          </div>
-          <p className="text-[#94a3b8] text-sm">Sign in to continue</p>
-          <SignInButton>
-            <button className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-medium transition-colors">
-              Sign in
-            </button>
-          </SignInButton>
-        </div>
-      </Show>
-      <Show when="signed-in">
-        <div className="absolute top-4 right-4 z-50">
-          <UserButton />
-        </div>
-        {status === 'idle' && (
-          <IdleView query={query} setQuery={setQuery} onSubmit={submit} errorMsg={errorMsg} />
-        )}
-        {status === 'analyzing' && <AnalyzingView query={query} />}
-        {status === 'polling' && <PollingView ticker={pollingTicker} />}
-        {status === 'results' && resultData && (
-          <>
-            {resultData.kind === 'advice' ? (
-              <AdviceResultView
-                query={query}
-                result={resultData}
-                onReset={reset}
-                onResubmit={submit}
-              />
-            ) : (
-              <TextResultView
-                query={query}
-                answer={resultData.answer}
-                onReset={reset}
-                onResubmit={submit}
-              />
-            )}
-          </>
-        )}
-      </Show>
+      <div className="absolute top-4 right-4 z-50">
+        <UserButton />
+      </div>
+      {status === 'idle' && (
+        <IdleView query={query} setQuery={setQuery} onSubmit={submit} errorMsg={errorMsg} />
+      )}
+      {status === 'analyzing' && <AnalyzingView query={query} />}
+      {status === 'polling' && <PollingView ticker={pollingTicker} />}
+      {status === 'results' && resultData && (
+        <>
+          {resultData.kind === 'advice' ? (
+            <AdviceResultView
+              query={query}
+              result={resultData}
+              onReset={reset}
+              onResubmit={submit}
+            />
+          ) : (
+            <TextResultView
+              query={query}
+              answer={resultData.answer}
+              onReset={reset}
+              onResubmit={submit}
+            />
+          )}
+        </>
+      )}
     </div>
   )
 }
