@@ -16,6 +16,9 @@ from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 router = APIRouter()
 
+# Bank holding companies and other entities with non-standard SEC filing structures not supported in v1.
+UNSUPPORTED_TICKERS = {"JPM", "BAC", "WFC", "GS", "C", "MS", "BRK.A", "BRK.B", "USB", "PNC"}
+
 
 class ChatRequest(BaseModel):
     query: str = Field(max_length=500)
@@ -62,6 +65,10 @@ def chat(body: ChatRequest, request: Request):
     if intent_type == "web_only":
         summary = run_web_search(body.query)
         return {"type": "web", "answer": summary}
+
+    # Block unsupported tickers before any pipeline work starts.
+    if ticker and ticker in UNSUPPORTED_TICKERS:
+        return {"type": "error", "message": f"{ticker} is a financial institution whose SEC filings use a non-standard structure not supported in v1. Try a company like AAPL, MSFT, NVDA, or TSLA."}
 
     # Comparison query — uses vector search + structured signals
     if intent_type == "comparison" and is_comparison_query(body.query):
