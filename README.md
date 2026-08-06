@@ -55,7 +55,6 @@ Seven agents, each with a distinct role and loop style:
 | Chunking | LangChain RecursiveCharacterTextSplitter |
 | Web search | Tavily API |
 | Queue | Redis + Redis Queue (RQ) |
-| Auth | Clerk |
 | Frontend | React 18 + TypeScript + Vite + Tailwind |
 | Deploy | Railway (API + DB + Redis + worker) + Vercel (frontend) |
 
