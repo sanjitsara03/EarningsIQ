@@ -10,6 +10,8 @@ export interface AdviceResponse {
   type: 'advice'
   ticker: string
   filing_type: string
+  period: string | null
+  filed_at: string | null
   recommendation: 'buy' | 'hold' | 'sell'
   confidence: 'high' | 'medium' | 'low'
   reasoning: string
@@ -49,6 +51,7 @@ export interface SignalsData {
   ticker: string
   period: string
   filing_type: string
+  filed_at: string | null
   revenue: number | null
   eps: number | null
   gross_margin: number | null

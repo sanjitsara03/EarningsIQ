@@ -30,6 +30,7 @@ interface AdviceResult {
   company: string
   ticker: string
   period: string
+  filedAt: string
   filingType: string
   recommendation: Recommendation
   confidence: 'high' | 'medium' | 'low'
@@ -74,6 +75,13 @@ function fmtEps(v: number | null): string {
   return `$${v.toFixed(2)}`
 }
 
+// Formats an ISO date (2025-06-28) as a compact human-readable date (Jun 28, 2025).
+function fmtDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`)
+  if (isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 // Builds the display result from advice + signals + risk API responses.
 function buildResult(
   advice: AdviceResponse,
@@ -85,8 +93,9 @@ function buildResult(
     kind: 'advice',
     company: advice.ticker,
     ticker: advice.ticker,
-    period: signals?.period ?? '',
-    filingType: signals?.filing_type ?? '10-Q',
+    period: advice.period ?? signals?.period ?? '',
+    filedAt: advice.filed_at ?? signals?.filed_at ?? '',
+    filingType: advice.filing_type ?? signals?.filing_type ?? '10-Q',
     recommendation: advice.recommendation.toUpperCase() as Recommendation,
     confidence: advice.confidence,
     reasoning: advice.reasoning,
@@ -478,8 +487,9 @@ function AdviceResultView({
       <div className="mb-8">
         <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568]">
           {result.ticker}
-          {result.period && <>&ensp;·&ensp;{result.period}</>}
           {result.filingType && <>&ensp;·&ensp;{result.filingType}</>}
+          {result.period && <>&ensp;·&ensp;Period ended {fmtDate(result.period)}</>}
+          {result.filedAt && <>&ensp;·&ensp;Filed {fmtDate(result.filedAt)}</>}
         </p>
         <p className="font-body text-[#3d4a5c] text-xs mt-1.5 italic">&ldquo;{query}&rdquo;</p>
       </div>

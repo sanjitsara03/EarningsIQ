@@ -2,6 +2,8 @@
 # Fast path: if ticker data is already in DB, runs advice and returns the answer immediately.
 # Slow path: if data is missing, enqueues the full pipeline and returns a job_id to poll.
 
+from datetime import date
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
@@ -9,9 +11,9 @@ from agents.advice import run_advice
 from agents.comparison import is_comparison_query, run_comparison
 from agents.orchestrator import run_orchestrator
 from agents.web_search import run_web_search
-from api.tasks import ticker_is_ready
+from api.tasks import FRESHNESS_WINDOW_DAYS, ticker_is_ready
 from db.connection import get_connection
-from db.queries import get_filing_ids_for_ticker, get_signals_for_filings
+from db.queries import get_latest_filing, get_signals_for_filings
 from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 router = APIRouter()
@@ -26,25 +28,58 @@ class ChatRequest(BaseModel):
     filing_type: str | None = None
 
 
-# Loads the most recent signals and risk score for a ticker from the DB.
-def _load_context(ticker: str, filing_type: str) -> tuple[dict, dict]:
+# Loads the most recent signals, risk score, and filing metadata for a ticker from the DB.
+def _load_context(ticker: str, filing_type: str) -> tuple[dict, dict, dict | None]:
     with get_connection() as conn:
-        filing_ids = get_filing_ids_for_ticker(conn, ticker, filing_type, limit=1)
-        signals_list = get_signals_for_filings(conn, filing_ids) if filing_ids else []
+        latest = get_latest_filing(conn, ticker, filing_type)
+        signals_list = get_signals_for_filings(conn, [latest["id"]]) if latest else []
 
         risk_result = {}
-        if filing_ids:
+        if latest:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT * FROM risk_scores WHERE filing_id = %s",
-                    (filing_ids[0],),
+                    (latest["id"],),
                 )
                 row = cur.fetchone()
                 if row:
                     cols = [d[0] for d in cur.description]
                     risk_result = dict(zip(cols, row))
 
-    return (signals_list[0] if signals_list else {}), risk_result
+    return (signals_list[0] if signals_list else {}), risk_result, latest
+
+
+# "Last quarter" questions route to the 10-Q, but a fiscal Q4 has no 10-Q — those numbers only
+# appear in the 10-K. When the latest 10-K is more recent than the latest 10-Q, analyze the 10-K
+# instead. If the company doesn't file one of the two forms, fall back to whichever it does file.
+def _resolve_filing_type(ticker: str, filing_type: str) -> str:
+    if filing_type != "10-Q":
+        return filing_type
+
+    with get_connection() as conn:
+        local_q = get_latest_filing(conn, ticker, "10-Q")
+        local_k = get_latest_filing(conn, ticker, "10-K")
+
+    # If our newest local filing is inside the quarterly cadence, the DB is current enough to decide.
+    local_dates = [f["filed_at"] for f in (local_q, local_k) if f and f["filed_at"]]
+    if local_dates and (date.today() - max(local_dates)).days < FRESHNESS_WINDOW_DAYS:
+        if local_k and (not local_q or local_k["filed_at"] > local_q["filed_at"]):
+            return "10-K"
+        return "10-Q"
+
+    # DB is stale or empty — ask EDGAR which form carries the most recent period.
+    try:
+        cik = get_cik(ticker)
+        edgar_q = get_10q_filings(cik, limit=1)
+        edgar_k = get_10k_filings(cik, limit=1)
+    except Exception:
+        return "10-Q"  # EDGAR unreachable or unknown ticker — let the main flow handle it
+
+    if not edgar_q:
+        return "10-K" if edgar_k else "10-Q"
+    if edgar_k and edgar_k[0]["filed_at"] > edgar_q[0]["filed_at"]:
+        return "10-K"
+    return "10-Q"
 
 
 @router.post("/chat")
@@ -103,6 +138,10 @@ def chat(body: ChatRequest, request: Request):
     if not ticker:
         return {"type": "error", "message": "Please mention a specific publicly traded company (e.g. Apple, MSFT, Tesla)."}
 
+    # Fiscal-Q4 routing: skip when the caller already pinned a filing type (retry after pipeline job).
+    if not body.filing_type:
+        filing_type = _resolve_filing_type(ticker, filing_type)
+
     # Check if ticker data is ready in DB
     if not ticker_is_ready(ticker, filing_type):
         # Pre-check EDGAR before enqueuing a long pipeline job — avoids 2-minute wait for ETFs/invalid tickers.
@@ -128,8 +167,15 @@ def chat(body: ChatRequest, request: Request):
         return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type}
 
     # Fast path — data exists, run advice
-    extracted_signals, risk_result = _load_context(ticker, filing_type)
+    extracted_signals, risk_result, latest_filing = _load_context(ticker, filing_type)
     web_summary = run_web_search(body.query) if intent.get("web_search_needed") else None
     advice = run_advice(ticker, extracted_signals, risk_result, web_summary)
 
-    return {"type": "advice", "ticker": ticker, "filing_type": filing_type, **advice.model_dump()}
+    return {
+        "type": "advice",
+        "ticker": ticker,
+        "filing_type": filing_type,
+        "period": latest_filing["period"] if latest_filing else None,
+        "filed_at": latest_filing["filed_at"].isoformat() if latest_filing and latest_filing["filed_at"] else None,
+        **advice.model_dump(),
+    }

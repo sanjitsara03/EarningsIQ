@@ -143,6 +143,25 @@ def insert_risk_score(
         )
 
 
+# Returns the most recent filing row for a ticker and filing type, or None if we've never ingested one.
+# Used for freshness checks (compare filed_at/accession against EDGAR) and for showing the filing date in results.
+def get_latest_filing(conn: connection, ticker: str, filing_type: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, period, filed_at, accession FROM filings
+            WHERE ticker = %s AND filing_type = %s
+            ORDER BY period DESC
+            LIMIT 1
+            """,
+            (ticker, filing_type),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return dict(zip(["id", "period", "filed_at", "accession"], row))
+
+
 # Returns filing IDs for a ticker and filing type, ordered by period descending. Used by the Comparison Agent.
 def get_filing_ids_for_ticker(conn: connection, ticker: str, filing_type: str, limit: int = 4) -> list[int]:
     with conn.cursor() as cur:
@@ -163,7 +182,7 @@ def get_signals_for_filings(conn: connection, filing_ids: list[int]) -> list[dic
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT f.ticker, f.period, f.filing_type,
+            SELECT f.ticker, f.period, f.filing_type, f.filed_at,
                    s.revenue, s.eps, s.gross_margin, s.operating_margin,
                    s.revenue_yoy_delta, s.guidance_revenue, s.guidance_withdrawn,
                    s.segments, s.notable_changes
@@ -174,7 +193,7 @@ def get_signals_for_filings(conn: connection, filing_ids: list[int]) -> list[dic
             """,
             (filing_ids,),
         )
-        cols = ["ticker", "period", "filing_type", "revenue", "eps", "gross_margin",
+        cols = ["ticker", "period", "filing_type", "filed_at", "revenue", "eps", "gross_margin",
                 "operating_margin", "revenue_yoy_delta", "guidance_revenue",
                 "guidance_withdrawn", "segments", "notable_changes"]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
