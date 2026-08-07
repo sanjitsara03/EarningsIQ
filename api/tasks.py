@@ -9,7 +9,7 @@ from datetime import date
 from agents.extraction import run_extraction
 from agents.risk_scoring import run_risk_scoring
 from db.connection import get_connection
-from db.queries import filing_exists, get_filing_ids_for_ticker, get_latest_filing, get_signals_for_filings
+from db.queries import filing_exists, get_filing_ids_for_ticker, get_filing_statuses, get_latest_filing, get_signals_for_filings
 from pipeline.ingest import ingest
 from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
@@ -20,18 +20,32 @@ logger = logging.getLogger(__name__)
 FRESHNESS_WINDOW_DAYS = 85
 
 
-# Ingests a ticker, then runs extraction and risk scoring on each new filing.
+# Ingests a ticker, then runs extraction and risk scoring on each filing that still needs it.
+# Status gating: 'scored' filings are skipped entirely; 'embedded'/'extracted' filings run the
+# remaining stages (inserts are upserts, so partial re-runs are safe). If ingestion produced
+# nothing new and no filing needs work, the job fails loudly instead of burning LLM tokens.
 def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) -> dict:
     logger.info(f"Starting full pipeline for {ticker} {filing_type}")
 
-    ingest(ticker, filing_type=filing_type, limit=limit)
+    new_ids = ingest(ticker, filing_type=filing_type, limit=limit)
 
     with get_connection() as conn:
         filing_ids = get_filing_ids_for_ticker(conn, ticker, filing_type, limit=limit)
+        statuses = get_filing_statuses(conn, filing_ids)
+
+    todo = [fid for fid in filing_ids if statuses.get(fid) in ("embedded", "extracted")]
+    if not todo:
+        if new_ids:
+            # Ingested but not embedded — shouldn't happen, but don't silently succeed.
+            raise RuntimeError(f"Filings {new_ids} were ingested but none reached 'embedded' status.")
+        raise RuntimeError(
+            f"No new filings ingested for {ticker} {filing_type} and none need processing. "
+            "Likely cause: ingestion failed upstream (e.g. embedding API credits) — check worker logs."
+        )
 
     results = []
-    for i, filing_id in enumerate(filing_ids):
-        logger.info(f"Running extraction for filing_id={filing_id}")
+    for i, filing_id in enumerate(todo):
+        logger.info(f"Running extraction for filing_id={filing_id} (status={statuses.get(filing_id)})")
         extracted = run_extraction(filing_id)
 
         if filing_type == "10-K":
@@ -41,7 +55,7 @@ def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) ->
 
         results.append({"filing_id": filing_id, "risk_tier": risk["risk_tier"], "overall_score": risk["overall_score"]})
 
-        if filing_type == "10-K" and i < len(filing_ids) - 1:
+        if filing_type == "10-K" and i < len(todo) - 1:
             time.sleep(60)  # wait before next filing's extraction to avoid TPM stacking
 
     logger.info(f"Pipeline complete for {ticker}: {results}")

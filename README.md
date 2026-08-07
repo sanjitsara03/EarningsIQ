@@ -51,7 +51,7 @@ Seven agents, each with a distinct role and loop style:
 | LLM SDK | Anthropic SDK |
 | Data validation | Pydantic v2 |
 | Database | PostgreSQL 16 + pgvector (HNSW index) |
-| Embeddings | OpenAI text-embedding-3-small (1536 dims) |
+| Embeddings | Voyage AI voyage-finance-2 (finance-domain, 1024 dims) |
 | Chunking | LangChain RecursiveCharacterTextSplitter |
 | Web search | Tavily API |
 | Queue | Redis + Redis Queue (RQ) |

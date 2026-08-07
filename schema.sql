@@ -29,7 +29,7 @@ CREATE TABLE chunks (
     section     TEXT NOT NULL,          -- "mda", "risk_factors", "financials", etc.
     chunk_index INT NOT NULL,
     content     TEXT NOT NULL,
-    embedding   vector(1536),           
+    embedding   vector(1024),           -- voyage-finance-2 dims
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

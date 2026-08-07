@@ -4,12 +4,10 @@
 
 import os
 
-from langchain_openai import OpenAIEmbeddings
 from psycopg2.extensions import connection
 
 from db.queries import get_filing_ids_for_ticker, get_signals_for_filings
-
-_embed_model = OpenAIEmbeddings(model="text-embedding-3-small")
+from pipeline.embeddings import embed_query as _embed_query
 
 TOOLS = [
     {
@@ -76,9 +74,9 @@ TOOLS = [
 ]
 
 
-# Embeds a query string using OpenAI text-embedding-3-small. Returns a list of 1536 floats.
+# Embeds a query string using the shared model (voyage-finance-2). Returns a list of 1024 floats.
 def embed_query(text: str) -> list[float]:
-    return _embed_model.embed_query(text)
+    return _embed_query(text)
 
 
 # Runs pgvector cosine similarity search over chunks for the given filing IDs. Returns top-k results.

@@ -1,9 +1,9 @@
 import logging
 
-from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from db.connection import get_connection
+from pipeline.embeddings import embed_documents
 from db.queries import filing_exists, insert_filing, update_filing_status
 from scraper.edgar_client import fetch_filing, get_cik, get_10k_filings, get_10q_filings
 from scraper.parser import parse_sections
@@ -21,7 +21,6 @@ _splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
     chunk_size=CHUNK_SIZE,
     chunk_overlap=CHUNK_OVERLAP,
 )
-_embed_model = OpenAIEmbeddings(model="text-embedding-3-small")
 
 
 # Insert a batch of chunks (with embeddings) into the chunks table.
@@ -40,11 +39,12 @@ def _insert_chunks(conn, filing_id: int, chunks: list[dict]) -> None:
 
 
 # Core pipeline for a single filing: chunk → embed → insert → update status.
-def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> None:
+# Returns the new filing_id, or None if the filing was already ingested.
+def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> int | None:
     with get_connection() as conn:
         if filing_exists(conn, filing["accession"]):
             logger.info(f"Skipping {filing['accession']} — already ingested.")
-            return
+            return None
 
         logger.info(f"Fetching {filing_type} {filing['period']} for {ticker}...")
         html = fetch_filing(filing["accession"], cik, filing["primary_doc"])
@@ -79,30 +79,36 @@ def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> No
 
         logger.info(f"Split into {len(all_chunks)} chunks. Embedding...")
 
-        # Embed all chunk contents in one batched API call.
+        # Embed all chunk contents in batched API calls.
         texts = [c["content"] for c in all_chunks]
-        embeddings = _embed_model.embed_documents(texts)
+        embeddings = embed_documents(texts)
         for chunk, embedding in zip(all_chunks, embeddings):
             chunk["embedding"] = embedding
 
         _insert_chunks(conn, filing_id, all_chunks)
         update_filing_status(conn, filing_id, "embedded")
         logger.info(f"Ingested {len(all_chunks)} chunks for filing id={filing_id}.")
+        return filing_id
 
 
 # Main entry point. Fetches and ingests all filings for a ticker and filing type.
-def ingest(ticker: str, filing_type: str = "10-Q", limit: int = 5) -> None:
+# Returns the filing_ids that were newly ingested this run (already-ingested and failed filings are excluded).
+def ingest(ticker: str, filing_type: str = "10-Q", limit: int = 5) -> list[int]:
     logger.info(f"Starting ingestion: {ticker} {filing_type} (limit={limit})")
     cik = get_cik(ticker)
 
     filings = get_10q_filings(cik, limit) if filing_type == "10-Q" else get_10k_filings(cik, limit)
     logger.info(f"Found {len(filings)} filings.")
 
+    new_ids = []
     for filing in filings:
         try:
-            _process_filing(filing, ticker, cik, filing_type)
+            filing_id = _process_filing(filing, ticker, cik, filing_type)
+            if filing_id is not None:
+                new_ids.append(filing_id)
         except Exception as e:
             logger.error(f"Failed to ingest {filing['accession']}: {e}", exc_info=True)
+    return new_ids
 
 
 if __name__ == "__main__":

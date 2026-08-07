@@ -62,6 +62,7 @@ def get_chunks_for_filing(conn: connection, filing_id: int) -> list[dict]:
 
 
 # Inserts extracted signals into the signals table. JSONB fields are serialized from Python objects.
+# Upserts on filing_id so re-running extraction on a filing is idempotent instead of crashing.
 def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
     fm = results.get("extract_financial_metrics", {})
     outlook = results.get("extract_management_outlook", {})
@@ -74,6 +75,18 @@ def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
                 guidance_revenue, guidance_period, guidance_withdrawn,
                 segments, notable_changes, risk_factors
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (filing_id) DO UPDATE SET
+                revenue = EXCLUDED.revenue,
+                eps = EXCLUDED.eps,
+                gross_margin = EXCLUDED.gross_margin,
+                operating_margin = EXCLUDED.operating_margin,
+                revenue_yoy_delta = EXCLUDED.revenue_yoy_delta,
+                guidance_revenue = EXCLUDED.guidance_revenue,
+                guidance_period = EXCLUDED.guidance_period,
+                guidance_withdrawn = EXCLUDED.guidance_withdrawn,
+                segments = EXCLUDED.segments,
+                notable_changes = EXCLUDED.notable_changes,
+                risk_factors = EXCLUDED.risk_factors
             """,
             (
                 filing_id,
@@ -112,7 +125,20 @@ def get_historical_signals(conn: connection, ticker: str) -> list[dict]:
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
+# Returns {filing_id: status} for a set of filing IDs. Used by the pipeline to skip completed stages.
+def get_filing_statuses(conn: connection, filing_ids: list[int]) -> dict[int, str]:
+    if not filing_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, status FROM filings WHERE id = ANY(%s)",
+            (filing_ids,),
+        )
+        return dict(cur.fetchall())
+
+
 # Inserts a completed risk score row into the risk_scores table.
+# Upserts on filing_id so re-scoring a filing is idempotent instead of crashing.
 def insert_risk_score(
     conn: connection,
     filing_id: int,
@@ -128,6 +154,15 @@ def insert_risk_score(
                 filing_id, guidance_cut_risk, demand_uncertainty, margin_pressure,
                 competitive_threat, macro_exposure, overall_score, risk_tier, executive_summary
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (filing_id) DO UPDATE SET
+                guidance_cut_risk = EXCLUDED.guidance_cut_risk,
+                demand_uncertainty = EXCLUDED.demand_uncertainty,
+                margin_pressure = EXCLUDED.margin_pressure,
+                competitive_threat = EXCLUDED.competitive_threat,
+                macro_exposure = EXCLUDED.macro_exposure,
+                overall_score = EXCLUDED.overall_score,
+                risk_tier = EXCLUDED.risk_tier,
+                executive_summary = EXCLUDED.executive_summary
             """,
             (
                 filing_id,
