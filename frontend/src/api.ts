@@ -27,6 +27,7 @@ export interface QueuedResponse {
   message: string
   ticker: string
   filing_type: string
+  intent: string
 }
 
 export interface ComparisonResponse {
@@ -84,7 +85,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // POST /chat — main query endpoint. Returns one of 4 response types.
 // Pass hint to skip the orchestrator when ticker/filing_type are already known (e.g. after pipeline retry).
-export function chat(query: string, hint?: { ticker: string; filing_type: string }): Promise<ChatResponse> {
+export function chat(query: string, hint?: { ticker: string; filing_type: string; intent?: string }): Promise<ChatResponse> {
   return request<ChatResponse>('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

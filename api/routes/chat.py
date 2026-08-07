@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     query: str = Field(max_length=500)
     ticker: str | None = None
     filing_type: str | None = None
+    intent: str | None = None
 
 
 # Loads the most recent signals, risk score, and filing metadata for a ticker from the DB.
@@ -98,11 +99,12 @@ def chat(body: ChatRequest, request: Request):
 
 def _chat(body: ChatRequest, request: Request):
     # Skip orchestrator if ticker and filing_type are already known (e.g. retry after pipeline job).
+    # The retry carries the first pass's orchestrator intent; the regex is only a fallback.
     if body.ticker and body.filing_type:
         ticker = body.ticker.upper()
         filing_type = body.filing_type
         intent = {"intent": "single_analysis", "ticker": ticker, "filing_types": [filing_type], "periods_needed": 1, "web_search_needed": False}
-        intent_type = "comparison" if is_comparison_query(body.query) else "single_analysis"
+        intent_type = body.intent or ("comparison" if is_comparison_query(body.query) else "single_analysis")
     else:
         intent = run_orchestrator(body.query)
         ticker = intent.get("ticker", "").upper()
@@ -142,7 +144,7 @@ def _chat(body: ChatRequest, request: Request):
                 intent.get("periods_needed", 1),
                 job_timeout=600,
             )
-            return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type}
+            return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type, "intent": intent_type}
 
         result = run_comparison(body.query)
         return {"type": "comparison", **result}
@@ -177,7 +179,7 @@ def _chat(body: ChatRequest, request: Request):
             intent.get("periods_needed", 1),
             job_timeout=600,
         )
-        return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type}
+        return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type, "intent": intent_type}
 
     # Fast path — data exists, run advice
     extracted_signals, risk_result, latest_filing = _load_context(ticker, filing_type)

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import clsx from 'clsx'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   chat,
   getSignals,
@@ -429,8 +430,17 @@ function TextResultView({
 
       <div className="max-w-2xl mb-10">
         <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
           components={{
             p: ({ children }) => <p className="font-body text-sm text-muted leading-relaxed mb-4">{children}</p>,
+            table: ({ children }) => (
+              <div className="overflow-x-auto mb-4">
+                <table className="w-full text-sm border-collapse">{children}</table>
+              </div>
+            ),
+            thead: ({ children }) => <thead className="border-b border-border">{children}</thead>,
+            th: ({ children }) => <th className="font-display font-semibold text-[#e2e8f0] text-left text-xs uppercase tracking-wider px-3 py-2">{children}</th>,
+            td: ({ children }) => <td className="font-mono text-sm text-muted px-3 py-2 border-b border-[#1f2635]">{children}</td>,
             strong: ({ children }) => <strong className="text-[#e2e8f0] font-semibold">{children}</strong>,
             ul: ({ children }) => <ul className="list-disc pl-5 flex flex-col gap-1.5 mb-4">{children}</ul>,
             ol: ({ children }) => <ol className="list-decimal pl-5 flex flex-col gap-1.5 mb-4">{children}</ol>,
@@ -662,9 +672,9 @@ export default function App() {
         setPollingTicker(ticker)
         setStatus('polling')
         await pollJob(chatRes.job_id)
-        // Pipeline done — re-run as fast path, bypassing the orchestrator with known ticker/filing_type.
+        // Pipeline done — re-run as fast path, carrying the first pass's ticker/filing_type/intent.
         setStatus('analyzing')
-        const retry = await chat(q, { ticker: chatRes.ticker, filing_type: chatRes.filing_type })
+        const retry = await chat(q, { ticker: chatRes.ticker, filing_type: chatRes.filing_type, intent: chatRes.intent })
         if (retry.type === 'advice') {
           await hydrateAdvice(retry)
         } else {
