@@ -4,6 +4,7 @@
 
 import logging
 import os
+from datetime import date
 
 from dotenv import load_dotenv
 from tavily import TavilyClient
@@ -24,9 +25,17 @@ logger = logging.getLogger(__name__)
 
 MAX_TURNS = 5
 
-SYSTEM_PROMPT = """You are a financial research assistant with access to a web search tool.
+SYSTEM_PROMPT_TEMPLATE = """You are a financial research assistant with access to a web search tool.
+Today's date is {today}.
 
 Use the search tool to find relevant, current information to answer the user's question.
+
+Grounding rules:
+- Base your answer ONLY on the search results. Your training data is outdated — never add
+  events, figures, or dates from memory.
+- Include the date of each news item you report, taken from the search results.
+- If the search results don't cover something, say so rather than filling the gap from memory.
+
 Synthesize the results into a concise, factual summary. Cite sources where relevant.
 Focus on information that would be useful for investment research."""
 
@@ -64,13 +73,17 @@ OPENAI_TOOLS = to_openai_tools([TAVILY_TOOL])
 
 
 # Standard tool loop that runs until the LLM stops calling tools and returns a text summary.
-# At MAX_TURNS, one final call with tools disabled forces a text answer.
+# The first turn forces a search; at MAX_TURNS, one final call with tools disabled forces a text answer.
 @traced("web_search")
 def run_web_search(query: str) -> str:
+    system = SYSTEM_PROMPT_TEMPLATE.format(today=date.today().strftime("%B %d, %Y"))
     messages = [user_msg(query)]
 
-    for _ in range(MAX_TURNS):
-        resp = chat("web_search", messages, system=SYSTEM_PROMPT, tools=OPENAI_TOOLS)
+    for turn in range(MAX_TURNS):
+        resp = chat(
+            "web_search", messages, system=system, tools=OPENAI_TOOLS,
+            tool_choice="required" if turn == 0 else None,
+        )
 
         # No tool calls means the LLM is done — return the text summary.
         if not resp.tool_calls:
@@ -85,7 +98,7 @@ def run_web_search(query: str) -> str:
         messages.extend(tool_result_msgs(pairs))
 
     # Turn cap reached — force a final text summary from the results gathered so far.
-    resp = chat("web_search", messages, system=SYSTEM_PROMPT, tools=OPENAI_TOOLS, tool_choice="none")
+    resp = chat("web_search", messages, system=system, tools=OPENAI_TOOLS, tool_choice="none")
     if resp.text and resp.text.strip():
         return resp.text
     raise LoopStallError("web_search", f"no text answer after {MAX_TURNS} turns")
