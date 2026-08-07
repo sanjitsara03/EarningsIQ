@@ -1,5 +1,5 @@
 # Tool schemas and handlers for the Extraction Agent.
-# TOOLS is passed to the Anthropic SDK tools= parameter.
+# TOOLS is the provider-neutral flat shape; agents convert it via llm.to_openai_tools().
 # TOOL_HANDLERS maps tool name → function that processes the LLM's input and returns stored data.
 
 TOOLS = [

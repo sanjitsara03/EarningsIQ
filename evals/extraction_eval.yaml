@@ -4,7 +4,7 @@ outputPath: evals/output/extraction_results.json
 providers:
   - id: "python:extraction_provider.py"
     config:
-      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+      pythonExecutable: python
 
 prompts:
   - "{{ticker}}"

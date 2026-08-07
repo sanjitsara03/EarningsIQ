@@ -62,7 +62,7 @@ def get_chunks_for_filing(conn: connection, filing_id: int) -> list[dict]:
 
 
 # Inserts extracted signals into the signals table. JSONB fields are serialized from Python objects.
-# Upserts on filing_id so re-running extraction on a filing is idempotent instead of crashing.
+# Upserts on filing_id; re-runs are idempotent.
 def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
     fm = results.get("extract_financial_metrics", {})
     outlook = results.get("extract_management_outlook", {})
@@ -138,7 +138,7 @@ def get_filing_statuses(conn: connection, filing_ids: list[int]) -> dict[int, st
 
 
 # Inserts a completed risk score row into the risk_scores table.
-# Upserts on filing_id so re-scoring a filing is idempotent instead of crashing.
+# Upserts on filing_id; re-runs are idempotent.
 def insert_risk_score(
     conn: connection,
     filing_id: int,

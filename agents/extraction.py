@@ -1,11 +1,19 @@
 import logging
-import os
 
-import anthropic
 from dotenv import load_dotenv
 
 from db.connection import get_connection
 from db.queries import get_chunks_for_filing, insert_signals, update_filing_status
+from llm import (
+    LoopStallError,
+    WrongToolError,
+    assistant_msg_from_response,
+    chat,
+    to_openai_tools,
+    tool_result_msgs,
+    traced,
+    user_msg,
+)
 from tools.extraction_tools import TOOL_HANDLERS, TOOLS
 
 load_dotenv()
@@ -13,7 +21,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 MAX_TURNS = 10
-MODEL = "claude-sonnet-4-5"
+OPENAI_TOOLS = to_openai_tools(TOOLS)
 
 SYSTEM_PROMPT = """You are a financial analyst extracting structured data from SEC 10-Q and 10-K filings.
 
@@ -52,48 +60,48 @@ def _build_prompt(chunks: list[dict]) -> str:
 
 # Runs the tool-collection loop for a single filing. Exits when all 5 tools have fired or MAX_TURNS is reached.
 # Returns the collected results dict and persists signals to the DB.
+@traced("extraction")
 def run_extraction(filing_id: int) -> dict:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
     with get_connection() as conn:
         chunks = get_chunks_for_filing(conn, filing_id)
 
     if not chunks:
         raise ValueError(f"No chunks found for filing_id={filing_id}")
 
-    messages = [{"role": "user", "content": _build_prompt(chunks)}]
+    messages = [user_msg(_build_prompt(chunks))]
     results = {}
     turns = 0
+    stalled_turns = 0
 
     while len(results) < 5 and turns < MAX_TURNS:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            tool_choice={"type": "any"},
-            messages=messages,
-        )
+        resp = chat("extraction", messages, system=SYSTEM_PROMPT, tools=OPENAI_TOOLS, tool_choice="required")
         turns += 1
 
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-
-        for tool_use in tool_uses:
-            if tool_use.name not in results:
-                results[tool_use.name] = TOOL_HANDLERS[tool_use.name](tool_use.input)
-                logger.info(f"Tool called: {tool_use.name} (turn {turns})")
+        before = len(results)
+        for tc in resp.tool_calls:
+            # Unknown tool names are a hard failure.
+            if tc.name not in TOOL_HANDLERS:
+                raise WrongToolError("extraction", "one of the five extraction tools", tc.name)
+            if tc.name not in results:
+                results[tc.name] = TOOL_HANDLERS[tc.name](tc.args)
+                logger.info(f"Tool called: {tc.name} (turn {turns})")
 
         if len(results) == 5:
             break
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "tool_result", "tool_use_id": t.id, "content": "OK"}
-                for t in tool_uses
-            ],
-        })
+        # Every call id must be acknowledged, including duplicate calls the dedup above skipped.
+        messages.append(assistant_msg_from_response(resp))
+        messages.extend(tool_result_msgs([(tc.id, "OK") for tc in resp.tool_calls]))
+
+        # Stall guard: one nudge after a no-progress turn; two consecutive no-progress turns abort.
+        missing = set(TOOL_HANDLERS.keys()) - set(results.keys())
+        if len(results) == before:
+            stalled_turns += 1
+            if stalled_turns >= 2:
+                raise LoopStallError("extraction", f"no new tools after {turns} turns; missing {missing}")
+            messages.append(user_msg(f"You still need to call these tools: {sorted(missing)}"))
+        else:
+            stalled_turns = 0
 
     if len(results) < 5:
         missing = set(TOOL_HANDLERS.keys()) - set(results.keys())

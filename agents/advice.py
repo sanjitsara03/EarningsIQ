@@ -4,18 +4,16 @@
 
 import json
 import logging
-import os
 from typing import Literal
 
-import anthropic
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from llm import LLMOutputError, chat_json, traced, user_msg
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-MODEL = "claude-sonnet-4-5"
 
 SYSTEM_PROMPT = """You are a senior financial analyst synthesizing research into an investment recommendation.
 
@@ -41,13 +39,19 @@ Rules:
 - Return only the JSON object, no other text."""
 
 
+# extra="forbid" emits additionalProperties: false in the schema.
 class AdviceOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     recommendation: Literal["buy", "hold", "sell"]
     confidence: Literal["high", "medium", "low"]
     reasoning: str
     key_risks: list[str]
     key_positives: list[str]
     disclaimer: str
+
+
+ADVICE_SCHEMA = AdviceOutput.model_json_schema()
 
 
 # Builds the user prompt from all available inputs.
@@ -68,33 +72,38 @@ def _build_prompt(ticker: str, extracted_signals: dict, risk_result: dict, web_s
     return "\n".join(parts)
 
 
-# Single LLM call — synthesizes all inputs into a structured AdviceOutput.
+# Single LLM call — synthesizes all inputs into a validated AdviceOutput.
+# One corrective retry on validation failure, then LLMOutputError.
+@traced("advice")
 def run_advice(
     ticker: str,
     extracted_signals: dict,
     risk_result: dict,
     web_summary: str | None = None,
 ) -> AdviceOutput:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
     prompt = _build_prompt(ticker, extracted_signals, risk_result, web_summary)
+    messages = [user_msg(prompt)]
+    data: dict = {}
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": "{"},
-        ],
-    )
+    for attempt in range(2):
+        data = chat_json(
+            "advice", messages, system=SYSTEM_PROMPT,
+            schema_name="advice_output", schema=ADVICE_SCHEMA,
+        )
+        try:
+            output = AdviceOutput.model_validate(data)
+        except ValidationError as e:
+            logger.warning(f"Advice output failed validation (attempt {attempt + 1}): {e}")
+            messages = [
+                user_msg(prompt),
+                {"role": "assistant", "content": json.dumps(data)},
+                user_msg(f"That response failed validation:\n{e}\nReturn a corrected JSON object."),
+            ]
+            continue
+        logger.info(f"Advice for {ticker}: {output.recommendation} ({output.confidence} confidence)")
+        return output
 
-    raw = "{" + response.content[0].text.strip()
-    data = json.loads(raw)
-    output = AdviceOutput(**data)
-
-    logger.info(f"Advice for {ticker}: {output.recommendation} ({output.confidence} confidence)")
-    return output
+    raise LLMOutputError("advice", "advice failed validation after retry", json.dumps(data))
 
 
 if __name__ == "__main__":

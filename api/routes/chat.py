@@ -2,6 +2,7 @@
 # Fast path: if ticker data is already in DB, runs advice and returns the answer immediately.
 # Slow path: if data is missing, enqueues the full pipeline and returns a job_id to poll.
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Request
@@ -14,9 +15,11 @@ from agents.web_search import run_web_search
 from api.tasks import FRESHNESS_WINDOW_DAYS, ticker_is_ready
 from db.connection import get_connection
 from db.queries import get_latest_filing, get_signals_for_filings
+from llm import LLMError
 from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Bank holding companies and other entities with non-standard SEC filing structures not supported in v1.
 UNSUPPORTED_TICKERS = {"JPM", "BAC", "WFC", "GS", "C", "MS", "BRK.A", "BRK.B", "USB", "PNC"}
@@ -84,6 +87,16 @@ def _resolve_filing_type(ticker: str, filing_type: str) -> str:
 
 @router.post("/chat")
 def chat(body: ChatRequest, request: Request):
+    # Maps typed LLM failures and loop timeouts to error responses. Pipeline failures surface
+    # via /job/{id}.
+    try:
+        return _chat(body, request)
+    except (LLMError, TimeoutError) as e:
+        logger.warning(f"Chat request failed: {type(e).__name__}: {e}")
+        return {"type": "error", "message": "The analysis service hit a temporary problem — please try again."}
+
+
+def _chat(body: ChatRequest, request: Request):
     # Skip orchestrator if ticker and filing_type are already known (e.g. retry after pipeline job).
     if body.ticker and body.filing_type:
         ticker = body.ticker.upper()

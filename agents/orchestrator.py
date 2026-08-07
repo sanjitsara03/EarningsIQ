@@ -8,16 +8,16 @@
 
 import json
 import logging
-import os
+from typing import Literal
 
-import anthropic
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from llm import LLMOutputError, chat_json, traced, user_msg
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-MODEL = "claude-haiku-4-5-20251001"
 
 SYSTEM_PROMPT = """You are a query router for a financial analysis system that reads SEC filings.
 
@@ -26,7 +26,7 @@ Given a user question, return a single JSON object with no extra text, markdown,
 JSON shape:
 {
   "intent": one of "single_analysis" | "comparison" | "advice" | "web_only",
-  "ticker": uppercase stock ticker (e.g. "AAPL"),
+  "ticker": uppercase stock ticker (e.g. "AAPL"), or "" (empty string) if no specific publicly traded company is mentioned,
   "filing_types": array containing "10-Q" and/or "10-K",
   "periods_needed": integer, how many filing periods to retrieve (default 1),
   "web_search_needed": boolean
@@ -56,24 +56,47 @@ web_search_needed:
 Return only the JSON object. No other text."""
 
 
-# Single LLM call — classifies the user query and returns a structured intent dict.
+# Validation model for the intent JSON; extra="forbid" emits additionalProperties: false in the
+# schema. An empty ticker string means no specific company was mentioned.
+class IntentOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: Literal["single_analysis", "comparison", "advice", "web_only"]
+    ticker: str
+    filing_types: list[Literal["10-Q", "10-K"]]
+    periods_needed: int
+    web_search_needed: bool
+
+
+ORCHESTRATOR_SCHEMA = IntentOutput.model_json_schema()
+
+
+# Single LLM call — classifies the user query into a validated intent dict.
+# One corrective retry on validation failure, then LLMOutputError.
+@traced("orchestrator")
 def run_orchestrator(query: str) -> dict:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    messages = [user_msg(query)]
+    data: dict = {}
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=256,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {"role": "user", "content": query},
-            {"role": "assistant", "content": "{"},
-        ],
-    )
+    for attempt in range(2):
+        data = chat_json(
+            "orchestrator", messages, system=SYSTEM_PROMPT,
+            schema_name="orchestrator_intent", schema=ORCHESTRATOR_SCHEMA,
+        )
+        try:
+            intent = IntentOutput.model_validate(data)
+        except ValidationError as e:
+            logger.warning(f"Orchestrator intent failed validation (attempt {attempt + 1}): {e}")
+            messages = [
+                user_msg(query),
+                {"role": "assistant", "content": json.dumps(data)},
+                user_msg(f"That response failed validation:\n{e}\nReturn a corrected JSON object."),
+            ]
+            continue
+        logger.info(f"Orchestrator: {query!r} → {intent.model_dump()}")
+        return intent.model_dump()
 
-    raw = "{" + response.content[0].text.strip()
-    intent = json.loads(raw)
-    logger.info(f"Orchestrator: {query!r} → {intent}")
-    return intent
+    raise LLMOutputError("orchestrator", "intent failed validation after retry", json.dumps(data))
 
 
 if __name__ == "__main__":

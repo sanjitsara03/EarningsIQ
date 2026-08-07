@@ -3,28 +3,37 @@
 # run_full_pipeline chains ingest → extraction → risk scoring for a ticker that isn't in the DB yet.
 
 import logging
-import time
 from datetime import date
 
 from agents.extraction import run_extraction
 from agents.risk_scoring import run_risk_scoring
 from db.connection import get_connection
 from db.queries import filing_exists, get_filing_ids_for_ticker, get_filing_statuses, get_latest_filing, get_signals_for_filings
+from llm import flush_traces, traced
 from pipeline.ingest import ingest
 from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 logger = logging.getLogger(__name__)
 
-# Companies file quarterly, so a filing younger than this can't have a successor on EDGAR yet.
-# Below this age we trust the DB and skip the network check entirely.
+# Filings younger than this cannot have a successor on EDGAR (quarterly cadence); below this age
+# the freshness check skips the network round trip.
 FRESHNESS_WINDOW_DAYS = 85
 
 
 # Ingests a ticker, then runs extraction and risk scoring on each filing that still needs it.
-# Status gating: 'scored' filings are skipped entirely; 'embedded'/'extracted' filings run the
-# remaining stages (inserts are upserts, so partial re-runs are safe). If ingestion produced
-# nothing new and no filing needs work, the job fails loudly instead of burning LLM tokens.
+# Status gating: 'scored' filings are skipped; 'embedded'/'extracted' filings run the remaining
+# stages (inserts are upserts). If ingestion produced nothing new and no filing needs work, the
+# job raises before any LLM call. flush_traces() runs after the @traced root span on the inner
+# function has closed; RQ work-horses exit immediately after the job.
 def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) -> dict:
+    try:
+        return _run_full_pipeline(ticker, filing_type, limit)
+    finally:
+        flush_traces()
+
+
+@traced("full_pipeline")
+def _run_full_pipeline(ticker: str, filing_type: str, limit: int) -> dict:
     logger.info(f"Starting full pipeline for {ticker} {filing_type}")
 
     new_ids = ingest(ticker, filing_type=filing_type, limit=limit)
@@ -44,19 +53,14 @@ def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) ->
         )
 
     results = []
-    for i, filing_id in enumerate(todo):
+    for filing_id in todo:
         logger.info(f"Running extraction for filing_id={filing_id} (status={statuses.get(filing_id)})")
         extracted = run_extraction(filing_id)
 
-        if filing_type == "10-K":
-            time.sleep(60)  # wait for TPM window to reset before risk scoring
         logger.info(f"Running risk scoring for filing_id={filing_id}")
         risk = run_risk_scoring(filing_id, ticker, extracted)
 
         results.append({"filing_id": filing_id, "risk_tier": risk["risk_tier"], "overall_score": risk["overall_score"]})
-
-        if filing_type == "10-K" and i < len(todo) - 1:
-            time.sleep(60)  # wait before next filing's extraction to avoid TPM stacking
 
     logger.info(f"Pipeline complete for {ticker}: {results}")
     return {"ticker": ticker, "filings_processed": results}
@@ -85,7 +89,7 @@ def ticker_is_ready(ticker: str, filing_type: str = "10-Q") -> bool:
         filings = get_10q_filings(cik, limit=1) if filing_type == "10-Q" else get_10k_filings(cik, limit=1)
     except Exception:
         logger.warning(f"EDGAR freshness check failed for {ticker} — serving existing data")
-        return True  # EDGAR unreachable: serve what we have rather than failing the request
+        return True  # EDGAR unreachable — serve existing data
 
     if not filings:
         return True

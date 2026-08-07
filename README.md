@@ -8,17 +8,19 @@ A multi-agent AI system that analyzes SEC filings and delivers investment-grade 
 
 Seven agents, each with a distinct role and loop style:
 
-| Agent | Model | Pattern |
+| Agent | Model (via OpenRouter) | Pattern |
 |---|---|---|
-| Orchestrator | claude-haiku-4-5 | Single LLM call → intent JSON |
+| Orchestrator | gemini-3-flash-preview | Single LLM call → strict-schema intent JSON |
 | Scraper | No LLM | Deterministic SEC EDGAR client |
-| Extraction | claude-sonnet-4-5 | Tool-collection loop — all 5 tools must fire |
-| Risk Scoring | claude-sonnet-4-5 | Strict ordered loop — 3 tools in sequence |
-| Comparison | claude-sonnet-4-5 | Open-ended loop, exits on terminal tool |
-| Web Search | claude-haiku-4-5 | Standard tool loop (Tavily) |
-| Advice | claude-sonnet-4-5 | No tools — pure synthesis, Pydantic output |
+| Extraction | gemini-3-flash-preview | Tool-collection loop — all 5 tools must fire |
+| Risk Scoring | gpt-5.2 (pinned to OpenAI first-party) | Strict ordered loop — named forced tool per step |
+| Comparison | claude-sonnet-4.6 | Open-ended loop, exits on terminal tool |
+| Web Search | gemini-3-flash-preview | Standard tool loop (Tavily) |
+| Advice | claude-sonnet-4.6 | No tools — pure synthesis, Pydantic output |
 
-**Orchestrator** classifies intent (`single_analysis`, `comparison`, `advice`, `web_only`), selects filing type (`10-Q` vs `10-K` vs both), and determines how many periods are needed — all in a single LLM call with assistant prefill to force raw JSON.
+Models are routed per-agent through OpenRouter: budget models where the capability requirements are easy, frontier models where correctness is hardest. A permanent capability harness (`evals/capability_harness.py`) probes each model+provider pair for the exact capabilities its agent depends on (named forced tool choice, parallel tool calls, strict structured outputs) — provider capability drifts, so it re-runs before demos and deploys.
+
+**Orchestrator** classifies intent (`single_analysis`, `comparison`, `advice`, `web_only`), selects filing type (`10-Q` vs `10-K` vs both), and determines how many periods are needed — one LLM call with strict `json_schema` structured outputs, validated by Pydantic.
 
 **Scraper** pulls filings from the SEC EDGAR public API. A custom `parse_sections()` parser extracts structured sections (MD&A, Risk Factors, Financial Statements, Business Overview) with TOC-skip logic and backward-looking TOC detection to handle the inconsistencies across company filings.
 
@@ -48,7 +50,8 @@ Seven agents, each with a distinct role and loop style:
 | Layer | Choice |
 |---|---|
 | Backend | Python 3.12 + FastAPI |
-| LLM SDK | Anthropic SDK |
+| LLM access | OpenRouter (`/chat/completions` via OpenAI SDK) — per-agent model routing across Google/OpenAI/Anthropic |
+| Observability | LangSmith tracing (optional — enabled via `LANGSMITH_TRACING`) |
 | Data validation | Pydantic v2 |
 | Database | PostgreSQL 16 + pgvector (HNSW index) |
 | Embeddings | Voyage AI voyage-finance-2 (finance-domain, 1024 dims) |

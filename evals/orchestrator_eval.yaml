@@ -4,7 +4,7 @@ outputPath: evals/output/orchestrator_results.json
 providers:
   - id: "python:orchestrator_provider.py"
     config:
-      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+      pythonExecutable: python
 
 prompts:
   - "{{query}}"

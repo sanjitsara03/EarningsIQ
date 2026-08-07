@@ -4,13 +4,19 @@
 # when the terminal tool cite_and_answer is called.
 
 import logging
-import os
 import re
 
-import anthropic
 from dotenv import load_dotenv
 
 from db.connection import get_connection
+from llm import (
+    assistant_msg_from_response,
+    chat,
+    to_openai_tools,
+    tool_result_msgs,
+    traced,
+    user_msg,
+)
 from tools.rag_tools import (
     TOOLS,
     handle_cite_and_answer,
@@ -23,8 +29,8 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-sonnet-4-5"
 MAX_TURNS = 10
+OPENAI_TOOLS = to_openai_tools(TOOLS)
 
 SYSTEM_PROMPT = """You are a financial analyst answering questions that require comparing data across multiple SEC filing periods.
 
@@ -74,57 +80,59 @@ def _format_tool_result(name: str, result) -> str:
 
 
 # Open-ended tool loop that exits when the LLM calls cite_and_answer. Returns the answer and citations.
+@traced("comparison")
 def run_comparison(query: str) -> dict:
     if not is_comparison_query(query):
         raise ValueError(f"Query does not appear to be a comparison question: {query!r}")
 
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    messages = [{"role": "user", "content": query}]
+    messages = [user_msg(query)]
     turns = 0
+    nudged = False
 
     while turns < MAX_TURNS:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-        )
+        resp = chat("comparison", messages, system=SYSTEM_PROMPT, tools=OPENAI_TOOLS)
         turns += 1
 
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-
-        # No tool calls — LLM finished without calling cite_and_answer, which is unexpected
-        if not tool_uses:
+        # No tool calls — the LLM finished without calling cite_and_answer. Nudge once toward the
+        # terminal tool; if it still answers in plain text, degrade to an uncited answer.
+        if not resp.tool_calls:
+            if not nudged:
+                nudged = True
+                logger.warning("Comparison agent answered in text — nudging toward cite_and_answer.")
+                messages.append(assistant_msg_from_response(resp))
+                messages.append(user_msg("Deliver your final answer by calling the cite_and_answer tool."))
+                continue
             logger.warning("Comparison agent stopped without calling cite_and_answer.")
-            text = next((b.text for b in response.content if hasattr(b, "text")), "")
-            return {"answer": text, "citations": []}
+            return {"answer": resp.text or "", "citations": []}
 
-        tool_results = []
+        pairs = []
         final_result = None
 
         with get_connection() as conn:
-            for tool_use in tool_uses:
-                logger.info(f"Tool called: {tool_use.name} (turn {turns})")
+            for tc in resp.tool_calls:
+                logger.info(f"Tool called: {tc.name} (turn {turns})")
 
-                if tool_use.name == "resolve_filing_ids":
-                    result = handle_resolve_filing_ids(tool_use.input, conn)
-                elif tool_use.name == "vector_search_chunks":
-                    result = handle_vector_search_chunks(tool_use.input, conn)
-                elif tool_use.name == "fetch_structured_signals":
-                    result = handle_fetch_structured_signals(tool_use.input, conn)
-                elif tool_use.name == "cite_and_answer":
-                    final_result = handle_cite_and_answer(tool_use.input)
-                    result = "Done."
+                if tc.name == "resolve_filing_ids":
+                    content = _format_tool_result(tc.name, handle_resolve_filing_ids(tc.args, conn))
+                elif tc.name == "vector_search_chunks":
+                    content = _format_tool_result(tc.name, handle_vector_search_chunks(tc.args, conn))
+                elif tc.name == "fetch_structured_signals":
+                    content = _format_tool_result(tc.name, handle_fetch_structured_signals(tc.args, conn))
+                elif tc.name == "cite_and_answer":
+                    final_result = handle_cite_and_answer(tc.args)
+                    content = "Done."
+                else:
+                    # Unknown tool name — return an error tool result.
+                    logger.warning(f"Unknown tool called: {tc.name}")
+                    content = (
+                        f"Error: unknown tool '{tc.name}'. Available tools: resolve_filing_ids, "
+                        "vector_search_chunks, fetch_structured_signals, cite_and_answer."
+                    )
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use.id,
-                    "content": _format_tool_result(tool_use.name, result) if tool_use.name != "cite_and_answer" else "Done.",
-                })
+                pairs.append((tc.id, content))
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
+        messages.append(assistant_msg_from_response(resp))
+        messages.extend(tool_result_msgs(pairs))
 
         if final_result is not None:
             logger.info(f"Comparison complete after {turns} turns.")

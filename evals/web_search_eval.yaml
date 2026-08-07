@@ -4,12 +4,22 @@ outputPath: evals/output/web_search_results.json
 providers:
   - id: "python:web_search_provider.py"
     config:
-      pythonExecutable: /Users/sanjit/Documents/EarningsAgentIQ/.venv/bin/python
+      pythonExecutable: python
 
 prompts:
   - "{{query}}"
 
+# llm-rubric grading goes through OpenRouter (same key as the agents) — no OpenAI account needed.
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:google/gemini-3-flash-preview
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
 tests:
+
   - vars:
       query: "What is the latest news about Apple?"
     assert:

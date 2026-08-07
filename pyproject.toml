@@ -6,12 +6,14 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiofiles>=25.1.0",
-    "anthropic>=0.86.0",
     "edgartools>=5.25.1",
     "fastapi>=0.135.2",
     "langchain-text-splitters>=1.1.1",
     "langchain-voyageai>=0.4.0",
+    "langsmith>=0.7.22",
+    "openai>=2.53.0",
     "psycopg2-binary>=2.9.11",
+    "pytest>=9.1.1",
     "python-dotenv>=1.2.2",
     "redis>=7.4.0",
     "requests>=2.32.5",
@@ -20,3 +22,7 @@ dependencies = [
     "tiktoken>=0.12.0",
     "uvicorn>=0.42.0",
 ]
+
+[tool.pytest.ini_options]
+markers = ["capability: probes real OpenRouter endpoints (costs money); run explicitly with -m capability"]
+addopts = "-m 'not capability'"

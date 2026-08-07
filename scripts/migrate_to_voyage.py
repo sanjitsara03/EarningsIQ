@@ -1,7 +1,5 @@
-# One-off migration: re-embed all stored chunks with voyage-finance-2.
-# Old OpenAI vectors and new Voyage vectors are not comparable, so every chunk must be
-# re-embedded in one pass. Re-embeds from the chunk content already in the DB — no EDGAR
-# refetch, no re-extraction, signals and risk scores are untouched.
+# One-off migration: re-embed all stored chunks with voyage-finance-2, using the chunk content
+# already in the DB. Signals and risk scores are untouched.
 #
 # Usage: uv run python scripts/migrate_to_voyage.py
 # Requires VOYAGE_API_KEY in the environment (.env is loaded). Safe to re-run.
@@ -22,11 +20,11 @@ from pipeline.embeddings import EMBED_MODEL, embed_documents, embed_query
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# 10 chunks ≈ 5K tokens — fits Voyage's no-payment-method tier (3 RPM / 10K TPM).
-BATCH = 10
+# 64 chunks ≈ 32K tokens per request. Free-tier keys (3 RPM / 10K TPM) need BATCH = 10.
+BATCH = 64
 
 
-# Embed one batch, waiting out per-minute rate limits instead of dying.
+# Embed one batch, sleeping through per-minute rate limits.
 def _embed_batch_throttled(texts: list[str]) -> list[list[float]]:
     while True:
         try:
@@ -37,7 +35,7 @@ def _embed_batch_throttled(texts: list[str]) -> list[list[float]]:
 
 
 def main() -> None:
-    # Probe the model for its real dimension instead of trusting a hardcoded number.
+    # Probe the model for its output dimension.
     dim = len(embed_query("dimension probe"))
     logger.info(f"{EMBED_MODEL} produces {dim}-dim vectors.")
 
@@ -56,7 +54,7 @@ def main() -> None:
                 cur.execute("DROP INDEX IF EXISTS chunks_embedding_idx")
                 cur.execute(f"ALTER TABLE chunks ALTER COLUMN embedding TYPE vector({dim}) USING NULL")
 
-            # Only chunks still missing a vector — makes the script resumable after any interruption.
+            # Only chunks still missing a vector; the script is resumable.
             cur.execute("SELECT id, content FROM chunks WHERE embedding IS NULL ORDER BY id")
             rows = cur.fetchall()
         logger.info(f"Re-embedding {len(rows)} chunks in batches of {BATCH}...")
@@ -69,7 +67,7 @@ def main() -> None:
                 for (chunk_id, _), vec in zip(batch, vectors):
                     vec_str = "[" + ",".join(str(x) for x in vec) + "]"
                     cur.execute("UPDATE chunks SET embedding = %s::vector WHERE id = %s", (vec_str, chunk_id))
-            conn.commit()  # persist each batch so an interruption never loses completed work
+            conn.commit()  # persist each batch
             done += len(batch)
             logger.info(f"  {done}/{len(rows)}")
 

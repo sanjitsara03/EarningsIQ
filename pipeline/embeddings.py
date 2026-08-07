@@ -1,6 +1,5 @@
 # Shared embedding model for the whole app. Ingestion (documents) and the Comparison Agent
-# (queries) MUST use the same model — vectors from different models live in different spaces,
-# and mixing them makes cosine similarity silently meaningless rather than raising an error.
+# (queries) must use the same model.
 import os
 
 from dotenv import load_dotenv
@@ -12,8 +11,7 @@ load_dotenv()
 EMBED_MODEL = "voyage-finance-2"
 EMBED_DIM = 1024
 
-# Lazily constructed so importing this module never requires VOYAGE_API_KEY
-# (mirrors the lazy DB pool — RQ workers import before env is guaranteed).
+# Lazily constructed; importing this module never requires VOYAGE_API_KEY.
 _embed_model: VoyageAIEmbeddings | None = None
 
 
@@ -22,7 +20,7 @@ def _get_model() -> VoyageAIEmbeddings:
     if _embed_model is None:
         if not os.getenv("VOYAGE_API_KEY"):
             raise RuntimeError("VOYAGE_API_KEY is not set — required for embeddings (voyage-finance-2).")
-        _embed_model = VoyageAIEmbeddings(model=EMBED_MODEL, batch_size=32)
+        _embed_model = VoyageAIEmbeddings(model=EMBED_MODEL, batch_size=64)
     return _embed_model
 
 
@@ -31,6 +29,6 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     return _get_model().embed_documents(texts)
 
 
-# Embeds a search query. Voyage uses a distinct query input type under the hood for better retrieval.
+# Embeds a search query.
 def embed_query(text: str) -> list[float]:
     return _get_model().embed_query(text)
