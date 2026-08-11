@@ -1,4 +1,5 @@
 import logging
+import re
 
 from dotenv import load_dotenv
 
@@ -41,8 +42,14 @@ You will be given filing text organized by section. You must call ALL FIVE extra
 - extract_notable_changes
 
 Rules:
-- Use only information present in the filing. Do not infer or guess missing values — omit them.
-- Always include verbatim quotes exactly as they appear in the text.
+- Report ONLY values present in the provided filing text. Never supply a number from memory,
+  estimation, or general knowledge — if a figure (for example diluted EPS) does not appear in
+  the text, omit that field entirely.
+- Always include verbatim quotes exactly as they appear in the text. Every quote field
+  (unit_quote, eps_quote, verbatim_quote) is verified verbatim against the filing; a value
+  whose quote cannot be found is discarded.
+- When you report eps, you must also report eps_quote: the exact line containing the diluted
+  EPS figure.
 - Report revenue exactly as printed in the financial tables, plus the table's stated unit
   (from captions like "In millions, except per share amounts") and that caption verbatim.
   Never convert the revenue figure yourself.
@@ -84,6 +91,110 @@ def _revenue_implausibility(filing_id: int, results: dict) -> str | None:
     return None
 
 
+_QUOTE_TRANSLATION = str.maketrans({
+    "‘": "'", "’": "'", "‛": "'",   # single curly quotes
+    "“": '"', "”": '"', "„": '"',   # double curly quotes
+    "–": "-", "—": "-", "−": "-",   # en/em dash, minus
+    "\xa0": " ",
+})
+
+
+# Canonical form for verbatim-quote comparison: typographic characters flattened, case folded,
+# whitespace runs collapsed.
+def _normalize_quote(s: str) -> str:
+    s = s.translate(_QUOTE_TRANSLATION).casefold()
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# Second-stage form: alphanumerics only. Tolerates dropped punctuation ("$ 1.84" vs "$1.84")
+# while still requiring every word in sequence.
+def _alnum_only(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+# True when the quote appears in the source the model was shown, anchored at token boundaries —
+# an unanchored substring test would let "1,84" verify against "21,845". Deterministic two-stage
+# match; no fuzzy matching, since near-miss acceptance would defeat the purpose.
+def _quote_in_source(quote, norm_source: str, alnum_source: str) -> bool:
+    if not quote or not str(quote).strip():
+        return False
+    norm = _normalize_quote(str(quote))
+    if norm and re.search(rf"(?<![a-z0-9]){re.escape(norm)}(?![a-z0-9])", norm_source):
+        return True
+    alnum = _alnum_only(norm)
+    # A quote that normalizes to nothing has no verifiable content, and boundary padding keeps
+    # token sequences intact ("1 84" must not match inside "21 845").
+    return bool(alnum) and f" {alnum} " in f" {alnum_source} "
+
+
+# True when the numeric value appears as a token sequence inside the quote text (e.g. eps 2.02
+# inside "Diluted earnings per share $ 2.02"). Binds the reported figure to its citation — a real
+# quote paired with a different number must not verify.
+def _number_in_text(value, text: str) -> bool:
+    if value is None or not text:
+        return False
+    alnum_text = f" {_alnum_only(_normalize_quote(str(text)))} "
+    candidates = {str(value), f"{float(value):.2f}", f"{float(value):g}"}
+    return any(f" {_alnum_only(_normalize_quote(c))} " in alnum_text for c in candidates)
+
+
+# Verifies the metrics tool's quotes. unit_quote is load-bearing (it justifies revenue_usd), so
+# its failure is HARD — returned as a problem string for the corrective-retry path. eps is soft:
+# it is dropped unless its quote is found in the filing AND contains the reported figure.
+def _verify_metrics_quotes(results: dict, norm_source: str, alnum_source: str) -> str | None:
+    fm = results.get("extract_financial_metrics", {})
+
+    if fm.get("eps") is not None:
+        quote_ok = _quote_in_source(fm.get("eps_quote"), norm_source, alnum_source)
+        value_ok = quote_ok and _number_in_text(fm.get("eps"), fm.get("eps_quote"))
+        if not value_ok:
+            reason = "not found in filing text" if not quote_ok else "does not contain the reported eps"
+            logger.warning(f"eps_quote {reason} — dropping eps. quote={fm.get('eps_quote')!r} eps={fm.get('eps')}")
+            fm["eps"] = None
+            fm["eps_quote"] = None
+
+    if fm.get("revenue_usd") is not None and not _quote_in_source(fm.get("unit_quote"), norm_source, alnum_source):
+        return f"unit_quote {fm.get('unit_quote')!r} was not found verbatim in the filing text"
+    return None
+
+
+# Verifies every quote-bearing field against the text the model was shown, applying the soft
+# policies in place (drop unverifiable items/fields with a warning). Returns the hard problem
+# string for the unit_quote case, or None.
+def _verify_quotes(results: dict, source_text: str) -> str | None:
+    norm_source = _normalize_quote(source_text)
+    alnum_source = _alnum_only(norm_source)
+
+    risks = results.get("extract_risk_factors") or []
+    kept = [r for r in risks if _quote_in_source(r.get("verbatim_quote"), norm_source, alnum_source)]
+    for r in risks:
+        if r not in kept:
+            logger.warning(f"Dropping risk factor with unverifiable quote: {r.get('label')!r}")
+    results["extract_risk_factors"] = kept
+
+    # The outlook's substance (guidance figure, withdrawn flag, period) is only as good as its
+    # quote. A missing, empty, or unverifiable quote voids all of it — an empty quote must not
+    # slip guidance through, and a fabricated "we withdrew guidance" must not survive its
+    # rejected citation.
+    outlook = results.get("extract_management_outlook") or {}
+    has_substance = outlook.get("guidance_revenue_usd") is not None or outlook.get("withdrawn")
+    if has_substance and not _quote_in_source(outlook.get("verbatim_quote"), norm_source, alnum_source):
+        logger.warning(f"Outlook quote unverifiable — dropping guidance fields. quote={outlook.get('verbatim_quote')!r}")
+        outlook["verbatim_quote"] = None
+        outlook["guidance_revenue_usd"] = None
+        outlook["guidance_period"] = None
+        outlook["withdrawn"] = None
+
+    changes = results.get("extract_notable_changes") or []
+    kept_changes = [c for c in changes if _quote_in_source(c.get("verbatim_quote"), norm_source, alnum_source)]
+    for c in changes:
+        if c not in kept_changes:
+            logger.warning(f"Dropping notable change with unverifiable quote: {c.get('metric')!r}")
+    results["extract_notable_changes"] = kept_changes
+
+    return _verify_metrics_quotes(results, norm_source, alnum_source)
+
+
 # Runs a tool handler, converting schema-violating arguments (missing keys, unknown units) into
 # a typed error instead of an untyped crash.
 def _run_handler(tool_name: str, args: dict) -> dict:
@@ -118,7 +229,8 @@ def run_extraction(filing_id: int) -> dict:
     if not chunks:
         raise ValueError(f"No chunks found for filing_id={filing_id}")
 
-    messages = [user_msg(_build_prompt(chunks))]
+    prompt_text = _build_prompt(chunks)
+    messages = [user_msg(prompt_text)]
     results = {}
     turns = 0
     stalled_turns = 0
@@ -159,16 +271,21 @@ def run_extraction(filing_id: int) -> dict:
             f"Extraction incomplete after {MAX_TURNS} turns. Missing: {missing}"
         )
 
-    # Plausibility guard: one corrective re-extraction of the metrics on an implausible revenue,
-    # then a hard error. An off-by-a-million figure must never be persisted.
-    problem = _revenue_implausibility(filing_id, results)
+    # Quote verification (soft drops applied in place; unit_quote failure is hard) runs before the
+    # plausibility guard so the retry message names the more fundamental defect. Either hard
+    # problem gets one corrective re-extraction of the metrics, then a hard error — an
+    # unverifiable or off-by-a-million figure must never be persisted.
+    hard_problem = _verify_quotes(results, prompt_text)
+    problem = hard_problem or _revenue_implausibility(filing_id, results)
     if problem:
-        logger.warning(f"Implausible revenue for filing_id={filing_id} — retrying metrics: {problem}")
+        logger.warning(f"Metrics failed verification for filing_id={filing_id} — retrying: {problem}")
         retry_messages = [
             messages[0],
             user_msg(
-                f"Your earlier extract_financial_metrics call produced an implausible figure: {problem}. "
-                "Re-read the financial statements and their unit caption, then call extract_financial_metrics again."
+                f"Your earlier extract_financial_metrics call produced an implausible figure or an "
+                f"unverifiable citation: {problem}. Re-read the financial statements; copy unit_quote "
+                "(and eps_quote if you report eps) exactly as printed, then call "
+                "extract_financial_metrics again."
             ),
         ]
         resp = chat(
@@ -185,9 +302,11 @@ def run_extraction(filing_id: int) -> dict:
             **results["extract_financial_metrics"],
             **{k: v for k, v in retry_metrics.items() if v is not None},
         }
-        problem = _revenue_implausibility(filing_id, results)
+        norm_source = _normalize_quote(prompt_text)
+        hard_problem = _verify_metrics_quotes(results, norm_source, _alnum_only(norm_source))
+        problem = hard_problem or _revenue_implausibility(filing_id, results)
         if problem:
-            raise LLMOutputError("extraction", f"revenue failed plausibility after retry: {problem}")
+            raise LLMOutputError("extraction", f"metrics failed verification after retry: {problem}")
 
     with get_connection() as conn:
         insert_signals(conn, filing_id, results)

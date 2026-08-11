@@ -36,6 +36,10 @@ TOOLS = [
                     "type": "number",
                     "description": "Diluted earnings per share in dollars (never scaled by the table unit).",
                 },
+                "eps_quote": {
+                    "type": "string",
+                    "description": "Verbatim line from the filing containing the diluted EPS figure. Required whenever eps is reported.",
+                },
                 "gross_margin": {
                     "type": "number",
                     "description": "Gross margin as a percentage, e.g. 45.2.",
@@ -226,11 +230,17 @@ def to_usd(value, unit: str):
 
 # Normalizes revenue to raw USD (revenue_usd). unit_quote is kept for provenance; the raw
 # filing-scaled number and unit are dropped so downstream consumers see exactly one convention.
+# eps without a supporting eps_quote is dropped (None, not popped — the corrective-retry merge
+# in run_extraction filters on `is not None`, so a retry can legitimately restore it).
 def handle_extract_financial_metrics(input: dict) -> dict:
     out = dict(input)
     out["revenue_usd"] = to_usd(input["revenue"], input["unit"])
     out.pop("revenue", None)
     out.pop("unit", None)
+    if out.get("eps") is not None and not out.get("eps_quote"):
+        logger.warning("eps given without eps_quote — dropping the figure")
+        out["eps"] = None
+        out["eps_quote"] = None
     return out
 
 
