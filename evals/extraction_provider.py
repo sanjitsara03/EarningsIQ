@@ -28,8 +28,8 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT revenue, eps, gross_margin, operating_margin,
-                           revenue_yoy_delta, guidance_revenue, guidance_withdrawn,
+                    SELECT revenue_usd, eps, gross_margin, operating_margin,
+                           revenue_yoy_delta, guidance_revenue_usd, guidance_withdrawn,
                            segments, notable_changes, risk_factors
                     FROM signals WHERE filing_id = %s
                     """,
@@ -40,8 +40,8 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
             if not row:
                 return {"error": f"No signals for filing_id={filing_id}. Run extraction first."}
 
-            cols = ["revenue", "eps", "gross_margin", "operating_margin", "revenue_yoy_delta",
-                    "guidance_revenue", "guidance_withdrawn", "segments", "notable_changes", "risk_factors"]
+            cols = ["revenue_usd", "eps", "gross_margin", "operating_margin", "revenue_yoy_delta",
+                    "guidance_revenue_usd", "guidance_withdrawn", "segments", "notable_changes", "risk_factors"]
             result = dict(zip(cols, row))
 
         return {"output": json.dumps(result, default=str)}

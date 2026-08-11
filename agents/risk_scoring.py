@@ -56,7 +56,7 @@ def _format_historical(rows: list[dict]) -> str:
     lines = ["Historical signals (most recent first):"]
     for row in rows:
         lines.append(
-            f"  {row['period']}: revenue={row['revenue']}, gross_margin={row['gross_margin']}%, "
+            f"  {row['period']}: revenue_usd={row['revenue_usd']}, gross_margin={row['gross_margin']}%, "
             f"operating_margin={row['operating_margin']}%, revenue_yoy_delta={row['revenue_yoy_delta']}%, "
             f"guidance_withdrawn={row['guidance_withdrawn']}"
         )
@@ -99,10 +99,11 @@ def run_risk_scoring(filing_id: int, ticker: str, extracted_signals: dict) -> di
         resp, tool_call = _forced_step(tool_name, messages)
         logger.info(f"Step {step + 1}/3 — tool called: {tool_call.name}")
 
-        # Tool 1: execute DB query and return real data to the LLM
+        # Tool 1: execute DB query and return real data to the LLM. The filing being scored is
+        # excluded so the baseline is genuinely historical.
         if tool_name == "fetch_historical_signals":
             with get_connection() as conn:
-                rows = get_historical_signals(conn, tool_call.args.get("ticker", ticker))
+                rows = get_historical_signals(conn, tool_call.args.get("ticker", ticker), exclude_filing_id=filing_id)
             tool_result_content = _format_historical(rows)
 
         # Tool 2: collect component scores, compute weighted average

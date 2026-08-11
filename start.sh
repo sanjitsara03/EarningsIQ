@@ -22,5 +22,8 @@ else:
 conn.close()
 "
 
+echo "Running column migrations..."
+uv run python scripts/migrate_revenue_units.py
+
 echo "Starting server..."
 exec uv run uvicorn api.main:app --host 0.0.0.0 --port "${PORT:-8000}"

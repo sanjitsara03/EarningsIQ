@@ -17,7 +17,7 @@ tests:
       - type: javascript
         value: |
           const o = JSON.parse(output);
-          return o.revenue !== undefined || o.revenue === null
+          return o.revenue_usd !== undefined || o.revenue_usd === null
       - type: javascript
         value: |
           const o = JSON.parse(output);
@@ -34,7 +34,7 @@ tests:
       - type: javascript
         value: |
           const o = JSON.parse(output);
-          return o.revenue !== undefined || o.revenue === null
+          return o.revenue_usd !== undefined || o.revenue_usd === null
       - type: javascript
         value: |
           const o = JSON.parse(output);

@@ -3,18 +3,26 @@ import logging
 from dotenv import load_dotenv
 
 from db.connection import get_connection
-from db.queries import get_chunks_for_filing, insert_signals, update_filing_status
+from db.queries import get_chunks_for_filing, get_filing_ticker, get_historical_signals, insert_signals, update_filing_status
 from llm import (
+    LLMOutputError,
     LoopStallError,
     WrongToolError,
     assistant_msg_from_response,
     chat,
+    named_tool_choice,
     to_openai_tools,
     tool_result_msgs,
     traced,
     user_msg,
 )
 from tools.extraction_tools import TOOL_HANDLERS, TOOLS
+
+# Extreme tripwire for unit-CLASS errors only (a millions figure stored as dollars shifts values
+# by x1e6). Company-specific revenue scale is checked adaptively in _revenue_implausibility —
+# these bounds intentionally say nothing about what "normal" revenue looks like.
+REVENUE_MIN_USD = 1e4   # $10K
+REVENUE_MAX_USD = 5e12  # $5T
 
 load_dotenv()
 
@@ -35,12 +43,54 @@ You will be given filing text organized by section. You must call ALL FIVE extra
 Rules:
 - Use only information present in the filing. Do not infer or guess missing values — omit them.
 - Always include verbatim quotes exactly as they appear in the text.
-- Revenue and financial figures should be in millions USD unless clearly stated otherwise.
+- Report revenue exactly as printed in the financial tables, plus the table's stated unit
+  (from captions like "In millions, except per share amounts") and that caption verbatim.
+  Never convert the revenue figure yourself.
 - Call all five tools even if some sections have limited data."""
 
 
 class ExtractionTimeoutError(Exception):
     pass
+
+
+# Returns a description of why the normalized revenue looks wrong, or None if it's plausible.
+# The checks are company-relative, so no assumption about a "normal" revenue range is made:
+#   1. Segment cross-check — segments carry their own independently-cited unit and must roughly
+#      sum to total revenue. Works on a first-ever extraction; a unit error on either side
+#      shifts the ratio by ~x1000.
+#   2. Prior-period ratio — this ticker's own history (current filing's row excluded).
+#   3. Extreme absolute tripwire — catches unit-class errors when neither adaptive check has data.
+def _revenue_implausibility(filing_id: int, results: dict) -> str | None:
+    revenue_usd = results["extract_financial_metrics"].get("revenue_usd")
+    if revenue_usd is None:
+        return None
+
+    if not (REVENUE_MIN_USD <= revenue_usd <= REVENUE_MAX_USD):
+        return f"revenue_usd={revenue_usd:,.0f} is outside the unit-sanity tripwire (${REVENUE_MIN_USD:,.0f}–${REVENUE_MAX_USD:,.0f})"
+
+    seg_sum = sum(s.get("revenue_usd") or 0 for s in results.get("extract_segment_performance") or [])
+    if seg_sum and not (1 / 3 <= revenue_usd / seg_sum <= 3):
+        return (
+            f"revenue_usd={revenue_usd:,.0f} disagrees with the segment revenue sum "
+            f"{seg_sum:,.0f} (ratio {revenue_usd / seg_sum:.2f}) — one side likely has a unit error"
+        )
+
+    with get_connection() as conn:
+        ticker = get_filing_ticker(conn, filing_id)
+        rows = get_historical_signals(conn, ticker, exclude_filing_id=filing_id) if ticker else []
+    prior = next((r["revenue_usd"] for r in rows if r.get("revenue_usd")), None)
+    if prior and not (0.1 <= revenue_usd / float(prior) <= 10):
+        return f"revenue_usd={revenue_usd:,.0f} is more than 10x away from the prior period's {float(prior):,.0f}"
+    return None
+
+
+# Runs a tool handler, converting schema-violating arguments (missing keys, unknown units) into
+# a typed error instead of an untyped crash.
+def _run_handler(tool_name: str, args: dict) -> dict:
+    try:
+        return TOOL_HANDLERS[tool_name](args)
+    except (KeyError, ValueError, TypeError) as e:
+        raise LLMOutputError("extraction", f"tool {tool_name} returned invalid arguments: {type(e).__name__}: {e}")
 
 
 # Groups chunks by section and builds a single prompt string with section headers.
@@ -83,7 +133,7 @@ def run_extraction(filing_id: int) -> dict:
             if tc.name not in TOOL_HANDLERS:
                 raise WrongToolError("extraction", "one of the five extraction tools", tc.name)
             if tc.name not in results:
-                results[tc.name] = TOOL_HANDLERS[tc.name](tc.args)
+                results[tc.name] = _run_handler(tc.name, tc.args)
                 logger.info(f"Tool called: {tc.name} (turn {turns})")
 
         if len(results) == 5:
@@ -108,6 +158,36 @@ def run_extraction(filing_id: int) -> dict:
         raise ExtractionTimeoutError(
             f"Extraction incomplete after {MAX_TURNS} turns. Missing: {missing}"
         )
+
+    # Plausibility guard: one corrective re-extraction of the metrics on an implausible revenue,
+    # then a hard error. An off-by-a-million figure must never be persisted.
+    problem = _revenue_implausibility(filing_id, results)
+    if problem:
+        logger.warning(f"Implausible revenue for filing_id={filing_id} — retrying metrics: {problem}")
+        retry_messages = [
+            messages[0],
+            user_msg(
+                f"Your earlier extract_financial_metrics call produced an implausible figure: {problem}. "
+                "Re-read the financial statements and their unit caption, then call extract_financial_metrics again."
+            ),
+        ]
+        resp = chat(
+            "extraction", retry_messages, system=SYSTEM_PROMPT,
+            tools=OPENAI_TOOLS, tool_choice=named_tool_choice("extract_financial_metrics"),
+        )
+        tc = resp.tool_calls[0]
+        if tc.name != "extract_financial_metrics":
+            raise WrongToolError("extraction", "extract_financial_metrics", tc.name)
+        # Merge over the first pass so optional fields it captured (eps, margins) survive a
+        # retry that only re-reports the revenue figure.
+        retry_metrics = _run_handler(tc.name, tc.args)
+        results["extract_financial_metrics"] = {
+            **results["extract_financial_metrics"],
+            **{k: v for k, v in retry_metrics.items() if v is not None},
+        }
+        problem = _revenue_implausibility(filing_id, results)
+        if problem:
+            raise LLMOutputError("extraction", f"revenue failed plausibility after retry: {problem}")
 
     with get_connection() as conn:
         insert_signals(conn, filing_id, results)

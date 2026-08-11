@@ -87,7 +87,9 @@ FAKE_SEARCH_TOOL = {
 }
 
 # A small fake filing for the extraction probe — enough substance that all five tools have data.
-FAKE_FILING = """=== MDA ===
+FAKE_FILING = """=== FINANCIALS ===
+(In millions, except per share amounts)
+=== MDA ===
 Revenue for the quarter was $2,450 million, up 12% year over year, driven by strength in the
 Cloud segment. Gross margin was 61.2%, and operating margin was 28.4%. Diluted EPS was $1.84.
 The Cloud segment grew 24% to $1,100 million; Devices declined 3% to $650 million; Services

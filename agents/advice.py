@@ -22,6 +22,8 @@ You will be given:
 - A risk score with component breakdown and executive summary
 - Optionally, recent web search results with current news and analyst sentiment
 
+All monetary signal fields ending in _usd are raw US dollars (e.g. 109400000000 = $109.4 billion).
+
 Your job is to weigh all of this evidence and return a JSON object with exactly this shape:
 {
   "recommendation": "buy" | "hold" | "sell",

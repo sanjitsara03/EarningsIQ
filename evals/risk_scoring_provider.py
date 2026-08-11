@@ -42,8 +42,8 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT s.revenue, s.eps, s.gross_margin, s.operating_margin,
-                           s.revenue_yoy_delta, s.guidance_revenue, s.guidance_withdrawn,
+                    SELECT s.revenue_usd, s.eps, s.gross_margin, s.operating_margin,
+                           s.revenue_yoy_delta, s.guidance_revenue_usd, s.guidance_withdrawn,
                            s.segments, s.notable_changes, s.risk_factors
                     FROM signals s WHERE s.filing_id = %s
                     """,
@@ -54,8 +54,8 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
             if not row:
                 return {"error": f"No signals found for filing_id={filing_id}. Run extraction first."}
 
-            cols = ["revenue", "eps", "gross_margin", "operating_margin", "revenue_yoy_delta",
-                    "guidance_revenue", "guidance_withdrawn", "segments", "notable_changes", "risk_factors"]
+            cols = ["revenue_usd", "eps", "gross_margin", "operating_margin", "revenue_yoy_delta",
+                    "guidance_revenue_usd", "guidance_withdrawn", "segments", "notable_changes", "risk_factors"]
             extracted_signals = dict(zip(cols, row))
 
         result = run_risk_scoring(filing_id, ticker, extracted_signals)

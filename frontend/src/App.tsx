@@ -103,7 +103,7 @@ function buildResult(
     metrics: [
       {
         label: 'Revenue',
-        value: fmtRevenue(signals?.revenue ?? null),
+        value: fmtRevenue(signals?.revenue_usd ?? null),
         delta: fmtDelta(revenueYoY),
         positive: (revenueYoY ?? 0) >= 0,
       },

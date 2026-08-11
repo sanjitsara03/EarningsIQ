@@ -43,14 +43,14 @@ CREATE TABLE signals (
     filing_id           INT NOT NULL REFERENCES filings(id) ON DELETE CASCADE,
 
     -- core financials
-    revenue             NUMERIC,
+    revenue_usd         NUMERIC,        -- raw USD (normalized from the filing's stated unit)
     eps                 NUMERIC,
     gross_margin        NUMERIC,        -- stored as a percentage
     operating_margin    NUMERIC,
     revenue_yoy_delta   NUMERIC,        -- percentage change vs same period last year
 
     -- what management guided for next quarter/year
-    guidance_revenue    NUMERIC,
+    guidance_revenue_usd NUMERIC,       -- raw USD
     guidance_period     TEXT,
     guidance_withdrawn  BOOLEAN DEFAULT FALSE,
 

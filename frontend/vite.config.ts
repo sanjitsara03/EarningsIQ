@@ -6,12 +6,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // Proxies /api/* → http://localhost:8000/* during development.
-      // In production, set VITE_API_URL to the Railway backend URL.
+      // Proxies /api/* → http://localhost:8000/api/* during development. Backend routes are
+      // /api-prefixed, so the prefix must be preserved. In production FastAPI serves the built
+      // frontend directly (same origin, no proxy).
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
   },

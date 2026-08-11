@@ -53,7 +53,7 @@ export interface SignalsData {
   period: string
   filing_type: string
   filed_at: string | null
-  revenue: number | null
+  revenue_usd: number | null
   eps: number | null
   gross_margin: number | null
   operating_margin: number | null

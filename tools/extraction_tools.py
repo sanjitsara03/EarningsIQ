@@ -1,6 +1,9 @@
 # Tool schemas and handlers for the Extraction Agent.
 # TOOLS is the provider-neutral flat shape; agents convert it via llm.to_openai_tools().
 # TOOL_HANDLERS maps tool name → function that processes the LLM's input and returns stored data.
+import logging
+
+logger = logging.getLogger(__name__)
 
 TOOLS = [
     {
@@ -18,11 +21,20 @@ TOOLS = [
                 },
                 "revenue": {
                     "type": "number",
-                    "description": "Total revenue in millions USD.",
+                    "description": "Total revenue exactly as printed in the filing's income statement — do not convert units.",
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": ["dollars", "thousands", "millions", "billions"],
+                    "description": "The unit the filing's financial tables are stated in, taken from the table caption.",
+                },
+                "unit_quote": {
+                    "type": "string",
+                    "description": "Verbatim caption stating the unit, e.g. 'In millions, except number of shares'.",
                 },
                 "eps": {
                     "type": "number",
-                    "description": "Diluted earnings per share.",
+                    "description": "Diluted earnings per share in dollars (never scaled by the table unit).",
                 },
                 "gross_margin": {
                     "type": "number",
@@ -37,7 +49,7 @@ TOOLS = [
                     "description": "Revenue year-over-year change as a percentage.",
                 },
             },
-            "required": ["period", "revenue"],
+            "required": ["period", "revenue", "unit", "unit_quote"],
         },
     },
     {
@@ -102,7 +114,7 @@ TOOLS = [
                             },
                             "revenue": {
                                 "type": "number",
-                                "description": "Segment revenue in millions USD.",
+                                "description": "Segment revenue exactly as printed in the filing — do not convert units.",
                             },
                             "growth": {
                                 "type": "number",
@@ -111,9 +123,14 @@ TOOLS = [
                         },
                         "required": ["name", "revenue"],
                     },
-                }
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": ["dollars", "thousands", "millions", "billions"],
+                    "description": "The unit the segment figures are stated in, from the table caption.",
+                },
             },
-            "required": ["segments"],
+            "required": ["segments", "unit"],
         },
     },
     {
@@ -127,7 +144,12 @@ TOOLS = [
             "properties": {
                 "guidance_revenue": {
                     "type": "number",
-                    "description": "Guided revenue for the next period in millions USD. Omit if withdrawn.",
+                    "description": "Guided revenue for the next period, exactly as stated. Omit if withdrawn.",
+                },
+                "guidance_revenue_unit": {
+                    "type": "string",
+                    "enum": ["dollars", "thousands", "millions", "billions"],
+                    "description": "The unit the guidance figure is stated in. Required when guidance_revenue is given.",
                 },
                 "guidance_period": {
                     "type": "string",
@@ -189,20 +211,59 @@ TOOLS = [
 # Each handler receives the raw input dict from the LLM tool call and returns it unchanged.
 # The extraction agent accumulates these into a results dict keyed by tool name.
 
+_UNIT_MULTIPLIERS = {"dollars": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
+
+
+# Converts a filing-stated figure to raw USD using the cited unit. Python owns this arithmetic —
+# the model reports (value, unit) as printed and never converts.
+def to_usd(value, unit: str):
+    if value is None:
+        return None
+    if unit not in _UNIT_MULTIPLIERS:
+        raise ValueError(f"unknown unit {unit!r} — expected one of {sorted(_UNIT_MULTIPLIERS)}")
+    return float(value) * _UNIT_MULTIPLIERS[unit]
+
+
+# Normalizes revenue to raw USD (revenue_usd). unit_quote is kept for provenance; the raw
+# filing-scaled number and unit are dropped so downstream consumers see exactly one convention.
 def handle_extract_financial_metrics(input: dict) -> dict:
-    return input
+    out = dict(input)
+    out["revenue_usd"] = to_usd(input["revenue"], input["unit"])
+    out.pop("revenue", None)
+    out.pop("unit", None)
+    return out
 
 
 def handle_extract_risk_factors(input: dict) -> dict:
     return input["risks"]
 
 
-def handle_extract_segment_performance(input: dict) -> dict:
-    return input["segments"]
+# Normalizes each segment's revenue to raw USD using the cited unit.
+def handle_extract_segment_performance(input: dict) -> list:
+    unit = input["unit"]
+    segments = []
+    for seg in input["segments"]:
+        out = dict(seg)
+        out["revenue_usd"] = to_usd(seg.get("revenue"), unit)
+        out.pop("revenue", None)
+        segments.append(out)
+    return segments
 
 
+# Normalizes guidance to raw USD. Guidance is a non-critical field: a figure with no stated unit
+# is dropped with a warning rather than failing the extraction.
 def handle_extract_management_outlook(input: dict) -> dict:
-    return input
+    out = dict(input)
+    guidance = input.get("guidance_revenue")
+    unit = input.get("guidance_revenue_unit")
+    if guidance is not None and unit is None:
+        logger.warning("guidance_revenue given without a unit — dropping the figure")
+        out["guidance_revenue_usd"] = None
+    else:
+        out["guidance_revenue_usd"] = to_usd(guidance, unit) if guidance is not None else None
+    out.pop("guidance_revenue", None)
+    out.pop("guidance_revenue_unit", None)
+    return out
 
 
 def handle_extract_notable_changes(input: dict) -> dict:

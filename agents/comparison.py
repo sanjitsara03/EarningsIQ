@@ -71,7 +71,7 @@ def _format_tool_result(name: str, result) -> str:
         lines = []
         for s in result:
             lines.append(
-                f"{s['period']} ({s['filing_type']}): revenue={s['revenue']}, "
+                f"{s['period']} ({s['filing_type']}): revenue_usd={s['revenue_usd']}, "
                 f"gross_margin={s['gross_margin']}%, operating_margin={s['operating_margin']}%, "
                 f"revenue_yoy_delta={s['revenue_yoy_delta']}%, guidance_withdrawn={s['guidance_withdrawn']}"
             )

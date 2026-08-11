@@ -24,12 +24,12 @@ tests:
   - vars:
       ticker: "AAPL"
       extracted_signals: >
-        {"revenue": 94930000000, "eps": 1.64, "gross_margin": 46.9,
+        {"revenue_usd": 94930000000, "eps": 1.64, "gross_margin": 46.9,
          "operating_margin": 31.5, "revenue_yoy_delta": 4.0,
-         "guidance_revenue": 96000000000, "guidance_period": "Q1 2025",
+         "guidance_revenue_usd": 96000000000, "guidance_period": "Q1 2025",
          "guidance_withdrawn": false,
          "risk_factors": [{"category": "macro", "label": "FX headwinds", "severity": "low"}],
-         "segments": [{"name": "iPhone", "revenue": 69143000000, "growth": 5.5}],
+         "segments": [{"name": "iPhone", "revenue_usd": 69143000000, "growth": 5.5}],
          "notable_changes": [{"metric": "Services revenue", "direction": "up", "magnitude": "12%"}]}
       risk_result: >
         {"overall_score": 3.5, "risk_tier": "low",
@@ -54,13 +54,13 @@ tests:
   - vars:
       ticker: "TSLA"
       extracted_signals: >
-        {"revenue": 21301000000, "eps": 0.27, "gross_margin": 14.9,
+        {"revenue_usd": 21301000000, "eps": 0.27, "gross_margin": 14.9,
          "operating_margin": 1.2, "revenue_yoy_delta": -9.0,
-         "guidance_revenue": null, "guidance_period": null,
+         "guidance_revenue_usd": null, "guidance_period": null,
          "guidance_withdrawn": true,
          "risk_factors": [{"category": "competitive", "label": "EV price war", "severity": "high"},
                           {"category": "demand", "label": "Weakening demand", "severity": "high"}],
-         "segments": [{"name": "Automotive", "revenue": 17378000000, "growth": -13.0}],
+         "segments": [{"name": "Automotive", "revenue_usd": 17378000000, "growth": -13.0}],
          "notable_changes": [{"metric": "Margins", "direction": "down", "magnitude": "significant"}]}
       risk_result: >
         {"overall_score": 7.8, "risk_tier": "high",

@@ -70,6 +70,60 @@ def test_parse_args_rejects_non_objects():
         _parse_args('"just a string"')
 
 
+def test_unit_normalization():
+    from tools.extraction_tools import handle_extract_financial_metrics, handle_extract_management_outlook, to_usd
+
+    assert to_usd(94930, "millions") == 94_930_000_000
+    assert to_usd(1.5, "billions") == 1_500_000_000
+    assert to_usd(250000, "thousands") == 250_000_000
+    assert to_usd(None, "millions") is None
+
+    fm = handle_extract_financial_metrics({"period": "Q3", "revenue": 109400, "unit": "millions", "unit_quote": "In millions"})
+    assert fm["revenue_usd"] == 109_400_000_000
+    assert "revenue" not in fm and "unit" not in fm
+    assert fm["unit_quote"] == "In millions"
+
+    outlook = handle_extract_management_outlook({"guidance_revenue": 10.2, "guidance_revenue_unit": "billions", "guidance_period": "Q4", "withdrawn": False, "verbatim_quote": "x"})
+    assert outlook["guidance_revenue_usd"] == 10_200_000_000
+    # A figure without a unit is dropped, never guessed.
+    no_unit = handle_extract_management_outlook({"guidance_revenue": 96000, "guidance_period": "Q4", "withdrawn": False, "verbatim_quote": "x"})
+    assert no_unit["guidance_revenue_usd"] is None
+
+    from tools.extraction_tools import handle_extract_segment_performance
+
+    segs = handle_extract_segment_performance({"unit": "millions", "segments": [{"name": "Cloud", "revenue": 1100, "growth": 24.0}]})
+    assert segs == [{"name": "Cloud", "revenue_usd": 1_100_000_000, "growth": 24.0}]
+
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        to_usd(100, "million")  # unknown unit must raise, never guess
+
+
+def test_revenue_plausibility_checks():
+    from agents.extraction import REVENUE_MAX_USD, REVENUE_MIN_USD, _revenue_implausibility
+
+    assert REVENUE_MIN_USD <= 94_930_000_000 <= REVENUE_MAX_USD
+
+    # Segment cross-check fires before any DB access, so these run without a database.
+    def results(revenue_usd, seg_revenues):
+        return {
+            "extract_financial_metrics": {"revenue_usd": revenue_usd},
+            "extract_segment_performance": [{"name": f"s{i}", "revenue_usd": r} for i, r in enumerate(seg_revenues)],
+        }
+
+    # Total carries a millions-as-dollars error; segments are correct -> caught, company-independent.
+    problem = _revenue_implausibility(999, results(94_930_000, [60_000_000_000, 34_000_000_000]))
+    assert problem and "segment" in problem
+
+    # Unit-class extremes are caught by the tripwire even with no segments and no history.
+    problem = _revenue_implausibility(999, results(5_000, []))
+    assert problem and "tripwire" in problem
+
+    # None revenue is not an error (10-K stub financials).
+    assert _revenue_implausibility(999, results(None, [])) is None
+
+
 def test_env_override_errors_are_clear(monkeypatch):
     import pytest
 

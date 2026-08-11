@@ -71,17 +71,17 @@ def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
             """
             INSERT INTO signals (
                 filing_id,
-                revenue, eps, gross_margin, operating_margin, revenue_yoy_delta,
-                guidance_revenue, guidance_period, guidance_withdrawn,
+                revenue_usd, eps, gross_margin, operating_margin, revenue_yoy_delta,
+                guidance_revenue_usd, guidance_period, guidance_withdrawn,
                 segments, notable_changes, risk_factors
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (filing_id) DO UPDATE SET
-                revenue = EXCLUDED.revenue,
+                revenue_usd = EXCLUDED.revenue_usd,
                 eps = EXCLUDED.eps,
                 gross_margin = EXCLUDED.gross_margin,
                 operating_margin = EXCLUDED.operating_margin,
                 revenue_yoy_delta = EXCLUDED.revenue_yoy_delta,
-                guidance_revenue = EXCLUDED.guidance_revenue,
+                guidance_revenue_usd = EXCLUDED.guidance_revenue_usd,
                 guidance_period = EXCLUDED.guidance_period,
                 guidance_withdrawn = EXCLUDED.guidance_withdrawn,
                 segments = EXCLUDED.segments,
@@ -90,12 +90,12 @@ def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
             """,
             (
                 filing_id,
-                fm.get("revenue"),
+                fm.get("revenue_usd"),
                 fm.get("eps"),
                 fm.get("gross_margin"),
                 fm.get("operating_margin"),
                 fm.get("revenue_yoy_delta"),
-                outlook.get("guidance_revenue"),
+                outlook.get("guidance_revenue_usd"),
                 outlook.get("guidance_period"),
                 outlook.get("withdrawn"),
                 json.dumps(results.get("extract_segment_performance")),
@@ -105,23 +105,25 @@ def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
         )
 
 
-# Fetches past signals for a ticker ordered by period descending. Used by the Risk Scoring Agent as a historical baseline.
-def get_historical_signals(conn: connection, ticker: str) -> list[dict]:
+# Fetches past signals for a ticker ordered by period descending, optionally excluding one filing
+# (the one currently being processed). Used as a historical baseline by risk scoring and the
+# extraction plausibility guard.
+def get_historical_signals(conn: connection, ticker: str, exclude_filing_id: int | None = None) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT f.period, s.revenue, s.eps, s.gross_margin, s.operating_margin,
-                   s.revenue_yoy_delta, s.guidance_revenue, s.guidance_withdrawn
+            SELECT f.period, s.revenue_usd, s.eps, s.gross_margin, s.operating_margin,
+                   s.revenue_yoy_delta, s.guidance_revenue_usd, s.guidance_withdrawn
             FROM signals s
             JOIN filings f ON s.filing_id = f.id
-            WHERE f.ticker = %s
+            WHERE f.ticker = %s AND (%s::int IS NULL OR s.filing_id != %s)
             ORDER BY f.period DESC
             LIMIT 8
             """,
-            (ticker,),
+            (ticker, exclude_filing_id, exclude_filing_id),
         )
-        cols = ["period", "revenue", "eps", "gross_margin", "operating_margin",
-                "revenue_yoy_delta", "guidance_revenue", "guidance_withdrawn"]
+        cols = ["period", "revenue_usd", "eps", "gross_margin", "operating_margin",
+                "revenue_yoy_delta", "guidance_revenue_usd", "guidance_withdrawn"]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
@@ -178,6 +180,14 @@ def insert_risk_score(
         )
 
 
+# Returns the ticker for a filing id, or None if the filing doesn't exist.
+def get_filing_ticker(conn: connection, filing_id: int) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT ticker FROM filings WHERE id = %s", (filing_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
 # Returns the most recent filing row for a ticker and filing type, or None if we've never ingested one.
 # Used for freshness checks (compare filed_at/accession against EDGAR) and for showing the filing date in results.
 def get_latest_filing(conn: connection, ticker: str, filing_type: str) -> dict | None:
@@ -218,8 +228,8 @@ def get_signals_for_filings(conn: connection, filing_ids: list[int]) -> list[dic
         cur.execute(
             """
             SELECT f.ticker, f.period, f.filing_type, f.filed_at,
-                   s.revenue, s.eps, s.gross_margin, s.operating_margin,
-                   s.revenue_yoy_delta, s.guidance_revenue, s.guidance_withdrawn,
+                   s.revenue_usd, s.eps, s.gross_margin, s.operating_margin,
+                   s.revenue_yoy_delta, s.guidance_revenue_usd, s.guidance_withdrawn,
                    s.segments, s.notable_changes
             FROM signals s
             JOIN filings f ON s.filing_id = f.id
@@ -228,8 +238,8 @@ def get_signals_for_filings(conn: connection, filing_ids: list[int]) -> list[dic
             """,
             (filing_ids,),
         )
-        cols = ["ticker", "period", "filing_type", "filed_at", "revenue", "eps", "gross_margin",
-                "operating_margin", "revenue_yoy_delta", "guidance_revenue",
+        cols = ["ticker", "period", "filing_type", "filed_at", "revenue_usd", "eps", "gross_margin",
+                "operating_margin", "revenue_yoy_delta", "guidance_revenue_usd",
                 "guidance_withdrawn", "segments", "notable_changes"]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
