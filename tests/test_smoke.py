@@ -240,20 +240,28 @@ def test_quote_normalization_and_match():
 
 
 def test_eps_value_must_appear_in_quote():
-    from agents.extraction import _verify_quotes
+    from agents.extraction import _normalize_quote, _alnum_only, _verify_metrics_quotes, _verify_quotes
 
     source = "(In millions, except per share amounts) Diluted earnings per share 2.02"
+    norm = _normalize_quote(source)
+    alnum = _alnum_only(norm)
     results = {
         "extract_financial_metrics": {
             "revenue_usd": 1e11, "unit_quote": "(In millions, except per share amounts)",
             "eps": 2.50, "eps_quote": "Diluted earnings per share 2.02",  # real quote, wrong figure
         },
     }
-    assert _verify_quotes(results, source) is None
+    # First pass: an eps failure is a retryable problem, not a silent drop.
+    problem = _verify_quotes(results, source)
+    assert problem is not None and "eps_quote" in problem
+    assert results["extract_financial_metrics"]["eps"] == 2.50
+
+    # Post-retry pass: still unverifiable — now the field drops.
+    assert _verify_metrics_quotes(results, norm, alnum, drop_unverified_eps=True) is None
     assert results["extract_financial_metrics"]["eps"] is None
 
     results["extract_financial_metrics"].update({"eps": 2.02, "eps_quote": "Diluted earnings per share 2.02"})
-    _verify_quotes(results, source)
+    assert _verify_quotes(results, source) is None
     assert results["extract_financial_metrics"]["eps"] == 2.02
 
 

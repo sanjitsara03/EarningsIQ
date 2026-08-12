@@ -24,5 +24,8 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-markers = ["capability: probes real OpenRouter endpoints (costs money); run explicitly with -m capability"]
-addopts = "-m 'not capability'"
+markers = [
+    "capability: probes real OpenRouter endpoints (costs money); run explicitly with -m capability",
+    "benchmark: runs the full agent pipeline + Tavily research + LLM judge (~$1); run explicitly with -m benchmark",
+]
+addopts = "-m 'not capability and not benchmark'"

@@ -53,6 +53,11 @@ Rules:
 - Report revenue exactly as printed in the financial tables, plus the table's stated unit
   (from captions like "In millions, except per share amounts") and that caption verbatim.
   Never convert the revenue figure yourself.
+- 10-Q income statements show both a "Three Months Ended" column and a year-to-date column
+  ("Six Months Ended" or "Nine Months Ended"). ALL metrics — revenue, EPS, margins, YoY change —
+  must come from the three-month (current quarter) column. For 10-Ks, use the current fiscal
+  year column. Never mix columns: when a statement row shows several values, pick the one under
+  the three-month (or current-year) current-period header.
 - Call all five tools even if some sections have limited data."""
 
 
@@ -138,29 +143,36 @@ def _number_in_text(value, text: str) -> bool:
     return any(f" {_alnum_only(_normalize_quote(c))} " in alnum_text for c in candidates)
 
 
-# Verifies the metrics tool's quotes. unit_quote is load-bearing (it justifies revenue_usd), so
-# its failure is HARD — returned as a problem string for the corrective-retry path. eps is soft:
-# it is dropped unless its quote is found in the filing AND contains the reported figure.
-def _verify_metrics_quotes(results: dict, norm_source: str, alnum_source: str) -> str | None:
+# Verifies the metrics tool's quotes. Both failures route through the corrective-retry path as
+# problem strings. After the retry (drop_unverified_eps=True) an eps failure degrades to dropping
+# the field — eps is legitimately optional — while unit_quote stays hard: it justifies
+# revenue_usd, which must never be persisted uncited.
+def _verify_metrics_quotes(
+    results: dict, norm_source: str, alnum_source: str, *, drop_unverified_eps: bool = False
+) -> str | None:
     fm = results.get("extract_financial_metrics", {})
 
+    problems = []
     if fm.get("eps") is not None:
         quote_ok = _quote_in_source(fm.get("eps_quote"), norm_source, alnum_source)
         value_ok = quote_ok and _number_in_text(fm.get("eps"), fm.get("eps_quote"))
         if not value_ok:
-            reason = "not found in filing text" if not quote_ok else "does not contain the reported eps"
-            logger.warning(f"eps_quote {reason} — dropping eps. quote={fm.get('eps_quote')!r} eps={fm.get('eps')}")
-            fm["eps"] = None
-            fm["eps_quote"] = None
+            reason = "was not found verbatim in the filing text" if not quote_ok else "does not contain the reported eps"
+            if drop_unverified_eps:
+                logger.warning(f"eps_quote {reason} after retry — dropping eps. quote={fm.get('eps_quote')!r} eps={fm.get('eps')}")
+                fm["eps"] = None
+                fm["eps_quote"] = None
+            else:
+                problems.append(f"eps_quote {fm.get('eps_quote')!r} {reason}")
 
     if fm.get("revenue_usd") is not None and not _quote_in_source(fm.get("unit_quote"), norm_source, alnum_source):
-        return f"unit_quote {fm.get('unit_quote')!r} was not found verbatim in the filing text"
-    return None
+        problems.append(f"unit_quote {fm.get('unit_quote')!r} was not found verbatim in the filing text")
+    return "; ".join(problems) or None
 
 
 # Verifies every quote-bearing field against the text the model was shown, applying the soft
-# policies in place (drop unverifiable items/fields with a warning). Returns the hard problem
-# string for the unit_quote case, or None.
+# policies in place (drop unverifiable items/fields with a warning). Returns a retryable problem
+# string for unit_quote/eps_quote failures, or None.
 def _verify_quotes(results: dict, source_text: str) -> str | None:
     norm_source = _normalize_quote(source_text)
     alnum_source = _alnum_only(norm_source)
@@ -284,8 +296,8 @@ def run_extraction(filing_id: int) -> dict:
             user_msg(
                 f"Your earlier extract_financial_metrics call produced an implausible figure or an "
                 f"unverifiable citation: {problem}. Re-read the financial statements; copy unit_quote "
-                "(and eps_quote if you report eps) exactly as printed, then call "
-                "extract_financial_metrics again."
+                "(and eps_quote if you report eps) exactly as printed — the entire row including any "
+                "parenthetical note references in its label — then call extract_financial_metrics again."
             ),
         ]
         resp = chat(
@@ -303,7 +315,9 @@ def run_extraction(filing_id: int) -> dict:
             **{k: v for k, v in retry_metrics.items() if v is not None},
         }
         norm_source = _normalize_quote(prompt_text)
-        hard_problem = _verify_metrics_quotes(results, norm_source, _alnum_only(norm_source))
+        hard_problem = _verify_metrics_quotes(
+            results, norm_source, _alnum_only(norm_source), drop_unverified_eps=True
+        )
         problem = hard_problem or _revenue_implausibility(filing_id, results)
         if problem:
             raise LLMOutputError("extraction", f"metrics failed verification after retry: {problem}")

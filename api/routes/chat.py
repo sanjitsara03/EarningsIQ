@@ -8,10 +8,10 @@ from datetime import date
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from agents.advice import run_advice
+from agents.advice import run_advice, run_analysis
 from agents.comparison import is_comparison_query, run_comparison
 from agents.orchestrator import run_orchestrator
-from agents.web_search import run_web_search
+from agents.web_search import run_web_search, run_web_search_detailed
 from api.tasks import FRESHNESS_WINDOW_DAYS, ticker_is_ready
 from db.connection import get_connection
 from db.queries import get_latest_filing, get_signals_for_filings
@@ -113,8 +113,12 @@ def _chat(body: ChatRequest, request: Request):
 
     # Web-only
     if intent_type == "web_only":
-        summary = run_web_search(body.query)
-        return {"type": "web", "answer": summary}
+        summary, sources = run_web_search_detailed(body.query)
+        return {
+            "type": "web",
+            "answer": summary,
+            "sources": [{"title": s["title"], "url": s["url"]} for s in sources],
+        }
 
     # Block unsupported tickers before any pipeline work starts.
     if ticker and ticker in UNSUPPORTED_TICKERS:
@@ -181,16 +185,27 @@ def _chat(body: ChatRequest, request: Request):
         )
         return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type, "intent": intent_type}
 
-    # Fast path — data exists, run advice
+    # Fast path — data exists. Factual single_analysis questions get a direct answer with no
+    # investment stance; advice questions get the buy/hold/sell card.
     extracted_signals, risk_result, latest_filing = _load_context(ticker, filing_type)
     web_summary = run_web_search(body.query) if intent.get("web_search_needed") else None
-    advice = run_advice(ticker, extracted_signals, risk_result, web_summary)
-
-    return {
-        "type": "advice",
+    period = latest_filing["period"] if latest_filing else None
+    provenance = {
         "ticker": ticker,
         "filing_type": filing_type,
-        "period": latest_filing["period"] if latest_filing else None,
+        "period": period,
         "filed_at": latest_filing["filed_at"].isoformat() if latest_filing and latest_filing["filed_at"] else None,
-        **advice.model_dump(),
     }
+
+    if intent_type == "single_analysis":
+        analysis = run_analysis(
+            body.query, ticker, extracted_signals, risk_result, web_summary,
+            filing_type, str(period) if period else None,
+        )
+        return {"type": "analysis", **provenance, **analysis.model_dump()}
+
+    advice = run_advice(
+        ticker, extracted_signals, risk_result, web_summary,
+        filing_type, str(period) if period else None,
+    )
+    return {"type": "advice", **provenance, **advice.model_dump()}

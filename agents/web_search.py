@@ -56,17 +56,17 @@ TAVILY_TOOL = {
 }
 
 
-# Executes a Tavily search and formats results as a readable string for the LLM.
-def _run_tavily_search(query: str) -> str:
+# Executes a Tavily search. Returns the raw result dicts plus a readable string for the LLM.
+def _run_tavily_search(query: str) -> tuple[list[dict], str]:
     client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
     response = client.search(query=query, max_results=5)
     results = response.get("results", [])
     if not results:
-        return "No results found."
+        return [], "No results found."
     lines = []
     for r in results:
         lines.append(f"[{r['title']}]({r['url']})\n{r['content']}\n")
-    return "\n".join(lines)
+    return results, "\n".join(lines)
 
 
 OPENAI_TOOLS = to_openai_tools([TAVILY_TOOL])
@@ -74,10 +74,25 @@ OPENAI_TOOLS = to_openai_tools([TAVILY_TOOL])
 
 # Standard tool loop that runs until the LLM stops calling tools and returns a text summary.
 # The first turn forces a search; at MAX_TURNS, one final call with tools disabled forces a text answer.
+# Returns the summary plus every source consulted (deduped by URL), so callers can surface
+# citations and evaluators can trace grounding.
 @traced("web_search")
-def run_web_search(query: str) -> str:
+def run_web_search_detailed(query: str) -> tuple[str, list[dict]]:
     system = SYSTEM_PROMPT_TEMPLATE.format(today=date.today().strftime("%B %d, %Y"))
     messages = [user_msg(query)]
+    retrieved_at = date.today().isoformat()
+    sources: dict[str, dict] = {}
+
+    def _search(q: str) -> str:
+        results, formatted = _run_tavily_search(q)
+        for r in results:
+            sources.setdefault(r["url"], {
+                "title": r.get("title") or "",
+                "url": r["url"],
+                "content": (r.get("content") or "")[:500],
+                "retrieved_at": retrieved_at,
+            })
+        return formatted
 
     for turn in range(MAX_TURNS):
         resp = chat(
@@ -87,12 +102,12 @@ def run_web_search(query: str) -> str:
 
         # No tool calls means the LLM is done — return the text summary.
         if not resp.tool_calls:
-            return resp.text or ""
+            return resp.text or "", list(sources.values())
 
         pairs = []
         for tc in resp.tool_calls:
             logger.info(f"Web search query: {tc.args['query']!r}")
-            pairs.append((tc.id, _run_tavily_search(tc.args["query"])))
+            pairs.append((tc.id, _search(tc.args["query"])))
 
         messages.append(assistant_msg_from_response(resp))
         messages.extend(tool_result_msgs(pairs))
@@ -100,8 +115,13 @@ def run_web_search(query: str) -> str:
     # Turn cap reached — force a final text summary from the results gathered so far.
     resp = chat("web_search", messages, system=system, tools=OPENAI_TOOLS, tool_choice="none")
     if resp.text and resp.text.strip():
-        return resp.text
+        return resp.text, list(sources.values())
     raise LoopStallError("web_search", f"no text answer after {MAX_TURNS} turns")
+
+
+def run_web_search(query: str) -> str:
+    summary, _ = run_web_search_detailed(query)
+    return summary
 
 
 if __name__ == "__main__":

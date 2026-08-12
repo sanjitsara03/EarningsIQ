@@ -49,6 +49,19 @@ AGENT_MODELS: dict[str, AgentLLMConfig] = {
         max_tokens=1024,
         provider={"require_parameters": True},
     ),
+    # Analyst-benchmark roles. The judge is a different model family than the sonnet-written
+    # advice/comparison outputs it grades.
+    "benchmark_judge": AgentLLMConfig(
+        model="openai/gpt-5.2",
+        max_tokens=8192,  # includes reasoning tokens
+        provider={"order": ["openai"], "allow_fallbacks": False, "require_parameters": True},
+        extra={"reasoning": {"effort": "low"}},
+    ),
+    "benchmark_extractor": AgentLLMConfig(
+        model="google/gemini-3-flash-preview",
+        max_tokens=1024,
+        provider={"require_parameters": True},
+    ),
 }
 
 

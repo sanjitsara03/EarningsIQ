@@ -30,15 +30,31 @@ export interface QueuedResponse {
   intent: string
 }
 
+export interface AnalysisResponse {
+  type: 'analysis'
+  ticker: string
+  filing_type: string
+  period: string | null
+  filed_at: string | null
+  answer: string
+  highlights: string[]
+}
+
 export interface ComparisonResponse {
   type: 'comparison'
   answer: string
   citations?: unknown[]
 }
 
+export interface WebSource {
+  title: string
+  url: string
+}
+
 export interface WebResponse {
   type: 'web'
   answer: string
+  sources?: WebSource[]
 }
 
 export interface ErrorResponse {
@@ -46,7 +62,7 @@ export interface ErrorResponse {
   message: string
 }
 
-export type ChatResponse = AdviceResponse | QueuedResponse | ComparisonResponse | WebResponse | ErrorResponse
+export type ChatResponse = AdviceResponse | AnalysisResponse | QueuedResponse | ComparisonResponse | WebResponse | ErrorResponse
 
 export interface SignalsData {
   ticker: string

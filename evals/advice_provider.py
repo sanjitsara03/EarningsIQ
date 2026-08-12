@@ -18,7 +18,10 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
         risk_result = json.loads(vars["risk_result"])
         web_summary = vars.get("web_summary")
 
-        result = run_advice(ticker, extracted_signals, risk_result, web_summary)
+        result = run_advice(
+            ticker, extracted_signals, risk_result, web_summary,
+            filing_type=vars.get("filing_type"), period=vars.get("period"),
+        )
         return {"output": json.dumps(result.model_dump())}
     except Exception as e:
         return {"error": str(e)}

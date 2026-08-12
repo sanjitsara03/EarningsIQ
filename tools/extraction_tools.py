@@ -21,7 +21,11 @@ TOOLS = [
                 },
                 "revenue": {
                     "type": "number",
-                    "description": "Total revenue exactly as printed in the filing's income statement — do not convert units.",
+                    "description": (
+                        "Total revenue exactly as printed in the filing's income statement — do not convert units. "
+                        "From the three-month (current quarter) column for 10-Qs — never the six- or nine-month "
+                        "year-to-date column; the current fiscal-year column for 10-Ks."
+                    ),
                 },
                 "unit": {
                     "type": "string",
@@ -34,7 +38,11 @@ TOOLS = [
                 },
                 "eps": {
                     "type": "number",
-                    "description": "Diluted earnings per share in dollars (never scaled by the table unit).",
+                    "description": (
+                        "Diluted earnings per share in dollars (never scaled by the table unit). "
+                        "From the same three-month (current quarter) column as revenue for 10-Qs — never the "
+                        "six- or nine-month year-to-date column; the current fiscal-year column for 10-Ks."
+                    ),
                 },
                 "eps_quote": {
                     "type": "string",
@@ -161,7 +169,11 @@ TOOLS = [
                 },
                 "withdrawn": {
                     "type": "boolean",
-                    "description": "True if management explicitly withdrew or declined to give guidance.",
+                    "description": (
+                        "True ONLY if the filing explicitly states that previously issued guidance was "
+                        "withdrawn, suspended, or will no longer be provided. Most filings contain no "
+                        "guidance at all — that absence is NOT a withdrawal; set false."
+                    ),
                 },
                 "verbatim_quote": {
                     "type": "string",

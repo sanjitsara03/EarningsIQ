@@ -9,8 +9,10 @@ import {
   getRisk,
   pollJob,
   type AdviceResponse,
+  type ChatResponse,
   type SignalsData,
   type RiskData,
+  type WebSource,
 } from './api'
 
 // --- Types ---
@@ -47,6 +49,14 @@ interface AdviceResult {
 interface TextResult {
   kind: 'text'
   answer: string
+  provenance?: {
+    ticker: string
+    filingType: string
+    period: string | null
+    filedAt: string | null
+  }
+  highlights?: string[]
+  sources?: WebSource[]
 }
 
 type ResultData = AdviceResult | TextResult
@@ -126,6 +136,28 @@ function buildResult(
     keyRisks: advice.key_risks,
     disclaimer: advice.disclaimer,
   }
+}
+
+// Builds the text display result from an analysis, comparison, or web response.
+function buildTextResult(res: ChatResponse): TextResult {
+  const answer = 'answer' in res ? (res.answer as string) : ''
+  if (res.type === 'analysis') {
+    return {
+      kind: 'text',
+      answer,
+      provenance: {
+        ticker: res.ticker,
+        filingType: res.filing_type,
+        period: res.period,
+        filedAt: res.filed_at,
+      },
+      highlights: res.highlights,
+    }
+  }
+  if (res.type === 'web') {
+    return { kind: 'text', answer, sources: res.sources }
+  }
+  return { kind: 'text', answer }
 }
 
 // --- Constants ---
@@ -399,20 +431,21 @@ function PollingView({ ticker }: { ticker: string }) {
   )
 }
 
-// --- Text result view (comparison / web) ---
+// --- Text result view (analysis / comparison / web) ---
 
 function TextResultView({
   query,
-  answer,
+  result,
   onReset,
   onResubmit,
 }: {
   query: string
-  answer: string
+  result: TextResult
   onReset: () => void
   onResubmit: (q: string) => void
 }) {
   const [newQuery, setNewQuery] = useState('')
+  const { answer, provenance, highlights, sources } = result
 
   return (
     <div className="min-h-screen px-6 py-8 max-w-4xl mx-auto animate-slide-up">
@@ -426,6 +459,14 @@ function TextResultView({
         </button>
       </div>
 
+      {provenance && (
+        <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-1.5">
+          {provenance.ticker}
+          {provenance.filingType && <>&ensp;·&ensp;{provenance.filingType}</>}
+          {provenance.period && <>&ensp;·&ensp;Period ended {fmtDate(provenance.period)}</>}
+          {provenance.filedAt && <>&ensp;·&ensp;Filed {fmtDate(provenance.filedAt)}</>}
+        </p>
+      )}
       <p className="font-body text-[#3d4a5c] text-xs italic mb-8">&ldquo;{query}&rdquo;</p>
 
       <div className="max-w-2xl mb-10">
@@ -454,6 +495,40 @@ function TextResultView({
           {answer}
         </ReactMarkdown>
       </div>
+
+      {highlights && highlights.length > 0 && (
+        <div className="max-w-2xl mb-10">
+          <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-3">Highlights</p>
+          <ul className="flex flex-col gap-2">
+            {highlights.map((h, i) => (
+              <li key={i} className="font-body text-sm text-muted leading-relaxed flex gap-2.5">
+                <span className="text-emerald-400 mt-0.5">›</span>
+                <span>{h}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {sources && sources.length > 0 && (
+        <div className="max-w-2xl mb-10">
+          <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-3">Sources</p>
+          <ul className="flex flex-col gap-1.5">
+            {sources.map((s, i) => (
+              <li key={i} className="font-body text-xs truncate">
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400 hover:underline"
+                >
+                  {s.title || s.url}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="border-t border-border pt-8">
         <QueryInput query={newQuery} setQuery={setNewQuery} onSubmit={onResubmit} compact />
@@ -678,8 +753,7 @@ export default function App() {
         if (retry.type === 'advice') {
           await hydrateAdvice(retry)
         } else {
-          const answer = 'answer' in retry ? (retry.answer as string) : ''
-          setResultData({ kind: 'text', answer })
+          setResultData(buildTextResult(retry))
           setStatus('results')
         }
         return
@@ -691,9 +765,8 @@ export default function App() {
         return
       }
 
-      // Comparison or web search — plain text answer
-      const answer = 'answer' in chatRes ? (chatRes.answer as string) : ''
-      setResultData({ kind: 'text', answer })
+      // Analysis, comparison, or web search — markdown answer
+      setResultData(buildTextResult(chatRes))
       setStatus('results')
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
@@ -727,7 +800,7 @@ export default function App() {
           ) : (
             <TextResultView
               query={query}
-              answer={resultData.answer}
+              result={resultData}
               onReset={reset}
               onResubmit={submit}
             />
