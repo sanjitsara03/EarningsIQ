@@ -8,12 +8,22 @@ from datetime import date
 from agents.extraction import run_extraction
 from agents.risk_scoring import run_risk_scoring
 from db.connection import get_connection
-from db.queries import filing_exists, get_filing_ids_for_ticker, get_filing_statuses, get_latest_filing, get_signals_for_filings
+from db.queries import (
+    filing_exists,
+    get_filing_ids_for_ticker,
+    get_filing_statuses,
+    get_latest_filing,
+    get_signals_for_filings,
+)
 from llm import flush_traces, traced
 from pipeline.ingest import ingest
 from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 logger = logging.getLogger(__name__)
+
+# RQ workers import this module directly — configure logging here so pipeline/agent warnings
+# (e.g. dropped unverifiable quotes) reach the worker logs. No-op when already configured.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # Filings younger than this cannot have a successor on EDGAR (quarterly cadence); below this age
 # the freshness check skips the network round trip.
@@ -70,13 +80,22 @@ def _run_full_pipeline(ticker: str, filing_type: str, limit: int) -> dict:
 # "Current" means: either the latest local filing is young enough that no successor can exist yet,
 # or EDGAR confirms we already hold the newest filing. A newer filing on EDGAR returns False,
 # which sends the chat route down the existing slow path (enqueue pipeline → poll → retry).
-def ticker_is_ready(ticker: str, filing_type: str = "10-Q") -> bool:
+# min_filings > 1 (multi-quarter comparisons) additionally requires that many filings with signals,
+# so a 4-quarter question backfills history instead of running against a single quarter.
+def ticker_is_ready(ticker: str, filing_type: str = "10-Q", min_filings: int = 1) -> bool:
     with get_connection() as conn:
         latest = get_latest_filing(conn, ticker, filing_type)
         if latest is None:
             return False
-        signals = get_signals_for_filings(conn, [latest["id"]])
-        if not signals:
+        check_ids = (
+            get_filing_ids_for_ticker(conn, ticker, filing_type, limit=min_filings)
+            if min_filings > 1
+            else [latest["id"]]
+        )
+        if len(check_ids) < min_filings:
+            return False
+        signals = get_signals_for_filings(conn, check_ids)
+        if len(signals) < min_filings:
             return False
 
     # Inside the quarterly filing cadence — nothing newer can exist, skip the EDGAR round trip.

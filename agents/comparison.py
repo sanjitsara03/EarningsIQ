@@ -79,7 +79,10 @@ def _format_tool_result(name: str, result) -> str:
     return str(result)
 
 
-# Open-ended tool loop that exits when the LLM calls cite_and_answer. Returns the answer and citations.
+# Open-ended tool loop that exits when the LLM calls cite_and_answer. Returns the answer,
+# citations, and a tool_trace of every tool result the model saw — consumers that only serve
+# the answer (the chat route) drop the trace; the benchmark keeps it so the judge can treat
+# DB-derived numbers as grounded.
 @traced("comparison")
 def run_comparison(query: str) -> dict:
     if not is_comparison_query(query):
@@ -88,6 +91,7 @@ def run_comparison(query: str) -> dict:
     messages = [user_msg(query)]
     turns = 0
     nudged = False
+    tool_trace: list[dict] = []
 
     while turns < MAX_TURNS:
         resp = chat("comparison", messages, system=SYSTEM_PROMPT, tools=OPENAI_TOOLS)
@@ -103,7 +107,7 @@ def run_comparison(query: str) -> dict:
                 messages.append(user_msg("Deliver your final answer by calling the cite_and_answer tool."))
                 continue
             logger.warning("Comparison agent stopped without calling cite_and_answer.")
-            return {"answer": resp.text or "", "citations": []}
+            return {"answer": resp.text or "", "citations": [], "tool_trace": tool_trace}
 
         pairs = []
         final_result = None
@@ -129,6 +133,8 @@ def run_comparison(query: str) -> dict:
                         "vector_search_chunks, fetch_structured_signals, cite_and_answer."
                     )
 
+                if tc.name != "cite_and_answer":
+                    tool_trace.append({"tool": tc.name, "args": tc.args, "result": content[:4000]})
                 pairs.append((tc.id, content))
 
         messages.append(assistant_msg_from_response(resp))
@@ -136,7 +142,7 @@ def run_comparison(query: str) -> dict:
 
         if final_result is not None:
             logger.info(f"Comparison complete after {turns} turns.")
-            return final_result
+            return {**final_result, "tool_trace": tool_trace}
 
     raise TimeoutError(f"Comparison agent did not call cite_and_answer within {MAX_TURNS} turns.")
 

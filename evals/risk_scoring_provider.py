@@ -2,14 +2,14 @@
 # Fetches existing risk score from DB if present, otherwise runs the agent.
 
 import json
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from agents.risk_scoring import run_risk_scoring
 from db.connection import get_connection
 from db.queries import get_filing_ids_for_ticker
-from agents.risk_scoring import run_risk_scoring
 
 
 def call_api(prompt: str, options: dict, context: dict) -> dict:

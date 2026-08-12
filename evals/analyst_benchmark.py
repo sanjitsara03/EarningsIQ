@@ -27,12 +27,16 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evals.benchmark_judge import deterministic_checks, extract_numeric_claims, run_judge
+from evals.benchmark_judge import (
+    deterministic_checks,
+    extract_numeric_claims,
+    run_judge,
+)
 from evals.benchmark_queries import QUERIES, BenchmarkQuery, default_research_queries
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -51,10 +55,10 @@ WORST_QUERY_WEIGHTS = {"factual_accuracy": 2, "coverage": 1, "grounding": 2, "di
 # routing minus HTTP/queue. Imports are deliberate reuse of the route's internals so this
 # cannot drift from prod routing.
 def run_agent_for_query(bq: BenchmarkQuery, ingest_missing: bool) -> dict:
+    from agents.advice import run_advice, run_analysis
     from agents.comparison import is_comparison_query, run_comparison
     from agents.orchestrator import run_orchestrator
     from agents.web_search import run_web_search
-    from agents.advice import run_advice, run_analysis
     from api.routes.chat import _load_context, _resolve_filing_type
     from api.tasks import run_full_pipeline, ticker_is_ready
 
@@ -84,7 +88,10 @@ def run_agent_for_query(bq: BenchmarkQuery, ingest_missing: bool) -> dict:
                 logger.info(f"Ingesting {ticker} {filing_type} inline (--ingest-missing)...")
                 run_full_pipeline(ticker, filing_type, intent.get("periods_needed", 1))
             record["route"] = "comparison"
-            record["agent_output"] = run_comparison(bq.query)
+            result = run_comparison(bq.query)
+            # The judge needs the tool results the agent saw, or DB-derived numbers read as ungrounded.
+            record["agent_inputs"] = {"tool_trace": result.pop("tool_trace", [])}
+            record["agent_output"] = result
         else:
             filing_type = _resolve_filing_type(ticker, filing_type)
             if not ticker_is_ready(ticker, filing_type):
@@ -146,13 +153,13 @@ def research_query(bq: BenchmarkQuery) -> dict:
                 seen[url] = {
                     "url": url, "title": r.get("title"), "content": r.get("content"),
                     "score": r.get("score"), "tavily_query": search,
-                    "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                    "retrieved_at": datetime.now(UTC).isoformat(),
                 }
         time.sleep(0.5)
     sources = sorted(seen.values(), key=lambda s: s.get("score") or 0, reverse=True)[:6]
     status = "ok" if len(sources) >= 3 else ("partial" if sources else "empty")
     return {"status": status, "sources": sources,
-            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "retrieved_at": datetime.now(UTC).isoformat(),
             "latency_ms": int((time.monotonic() - start) * 1000)}
 
 
@@ -238,8 +245,10 @@ def write_markdown(report: dict, path: Path) -> None:
     cfg = report["config"]
     lines = [
         "# Analyst Benchmark Summary",
-        f"\nRun: {report['run_at']} · git {report['git_sha']} · judge {cfg['judge_model']} · "
-        f"research {cfg['research_mode']} ({cfg.get('research_snapshot', '-')})",
+        (
+            f"\nRun: {report['run_at']} · git {report['git_sha']} · judge {cfg['judge_model']} · "
+            f"research {cfg['research_mode']} ({cfg.get('research_snapshot', '-')})"
+        ),
         "\n## Scores (1-5; means over judged queries)\n",
         "| dimension | mean |", "|---|---|",
     ]
@@ -302,7 +311,7 @@ def build_report(query_records: list[dict], research_mode: str, research_snapsho
         }
         git_sha = _git_sha()
     return {
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "git_sha": git_sha,
         "config": config,
         "queries": query_records,
@@ -367,7 +376,7 @@ def main() -> int:
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     try:
         base_report = None

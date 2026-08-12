@@ -12,10 +12,9 @@
 import argparse
 import json
 import logging
-import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import openai
 
 from llm import (
-    LLMOutputError,
     NoToolCallError,
     assistant_msg_from_response,
     chat,
@@ -408,7 +406,7 @@ def run_probes(only_agent: str | None = None, include_cache_probe: bool = False)
         gates["risk_scoring"] = "pass_named" if named_ok else ("pass_fallback_only" if single_ok else "fail")
 
     report = {
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "results": results,
         "summary": {
             "gates": gates,
@@ -437,7 +435,7 @@ def main() -> int:
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     (OUTPUT_DIR / "capability_report.json").write_text(json.dumps(report, indent=2, default=str))
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     (OUTPUT_DIR / f"capability_report_{ts}.json").write_text(json.dumps(report, indent=2, default=str))
 
     print("\n=== Capability gates ===")

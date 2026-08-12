@@ -3,9 +3,9 @@ import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from db.connection import get_connection
-from pipeline.embeddings import embed_documents
 from db.queries import filing_exists, insert_filing, update_filing_status
-from scraper.edgar_client import fetch_filing, get_cik, get_10k_filings, get_10q_filings
+from pipeline.embeddings import embed_documents
+from scraper.edgar_client import fetch_filing, get_10k_filings, get_10q_filings, get_cik
 from scraper.parser import parse_sections
 
 logging.basicConfig(
@@ -106,8 +106,8 @@ def ingest(ticker: str, filing_type: str = "10-Q", limit: int = 5) -> list[int]:
             filing_id = _process_filing(filing, ticker, cik, filing_type)
             if filing_id is not None:
                 new_ids.append(filing_id)
-        except Exception as e:
-            logger.error(f"Failed to ingest {filing['accession']}: {e}", exc_info=True)
+        except Exception:
+            logger.exception(f"Failed to ingest {filing['accession']}")
     return new_ids
 
 

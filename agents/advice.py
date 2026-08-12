@@ -186,6 +186,7 @@ def run_analysis(
 
 if __name__ == "__main__":
     import sys
+
     from db.connection import get_connection
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -193,31 +194,30 @@ if __name__ == "__main__":
     ticker = sys.argv[1] if len(sys.argv) > 1 else "MSFT"
 
     # Load signals and risk score from DB for standalone testing
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT s.*, f.ticker, f.period, f.filing_type FROM signals s
                 JOIN filings f ON s.filing_id = f.id
                 WHERE f.ticker = %s ORDER BY f.period DESC LIMIT 1
                 """,
-                (ticker,),
-            )
-            row = cur.fetchone()
-            cols = [d[0] for d in cur.description]
-            extracted_signals = dict(zip(cols, row)) if row else {}
+            (ticker,),
+        )
+        row = cur.fetchone()
+        cols = [d[0] for d in cur.description]
+        extracted_signals = dict(zip(cols, row)) if row else {}
 
-            cur.execute(
-                """
+        cur.execute(
+            """
                 SELECT r.* FROM risk_scores r
                 JOIN filings f ON r.filing_id = f.id
                 WHERE f.ticker = %s ORDER BY f.period DESC LIMIT 1
                 """,
-                (ticker,),
-            )
-            row = cur.fetchone()
-            cols = [d[0] for d in cur.description]
-            risk_result = dict(zip(cols, row)) if row else {}
+            (ticker,),
+        )
+        row = cur.fetchone()
+        cols = [d[0] for d in cur.description]
+        risk_result = dict(zip(cols, row)) if row else {}
 
     result = run_advice(
         ticker, extracted_signals, risk_result,

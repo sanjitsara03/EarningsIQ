@@ -1,5 +1,6 @@
 # FastAPI app entry point. Mounts all route modules and sets up the Redis connection.
 
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -9,9 +10,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from redis import Redis
 from rq import Queue
+
 from api.routes import chat, ingest, jobs, risk, signals
 
 load_dotenv()
+
+# Surface agent/pipeline logs (quote-verification warnings, extraction progress) in prod output.
+# No-op if the root logger is already configured; uvicorn's own loggers are unaffected.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 app = FastAPI(title="EarningsAgentIQ", version="1.0.0")
 

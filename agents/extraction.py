@@ -4,7 +4,13 @@ import re
 from dotenv import load_dotenv
 
 from db.connection import get_connection
-from db.queries import get_chunks_for_filing, get_filing_ticker, get_historical_signals, insert_signals, update_filing_status
+from db.queries import (
+    get_chunks_for_filing,
+    get_filing_ticker,
+    get_historical_signals,
+    insert_signals,
+    update_filing_status,
+)
 from llm import (
     LLMOutputError,
     LoopStallError,

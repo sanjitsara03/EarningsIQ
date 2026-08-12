@@ -1,7 +1,8 @@
 # Fetches SEC EDGAR filings for a given ticker.
 # Four functions: get_cik, get_10q_filings, get_10k_filings, fetch_filing.
-import os
 import json
+import os
+
 import requests
 from dotenv import load_dotenv
 
@@ -9,6 +10,8 @@ load_dotenv()
 
 SEC_HEADERS = {"User-Agent": os.getenv("SEC_USER_AGENT")}
 CIK_CACHE = "cik_cache.json"
+# Without a timeout, a hung EDGAR response stalls an RQ worker for the full 600s job timeout.
+EDGAR_TIMEOUT = 30
 
 
 def get_cik(ticker: str) -> str:
@@ -19,6 +22,7 @@ def get_cik(ticker: str) -> str:
         response = requests.get(
             "https://www.sec.gov/files/company_tickers.json",
             headers=SEC_HEADERS,
+            timeout=EDGAR_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -43,7 +47,7 @@ def get_10k_filings(cik: str, limit: int = 3) -> list[dict]:
 
 def _get_filings(cik: str, form: str, limit: int) -> list[dict]:
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    response = requests.get(url, headers=SEC_HEADERS)
+    response = requests.get(url, headers=SEC_HEADERS, timeout=EDGAR_TIMEOUT)
     response.raise_for_status()
     recent = response.json()["filings"]["recent"]
 
@@ -68,6 +72,6 @@ def fetch_filing(accession: str, cik: str, primary_doc: str) -> str:
         f"https://www.sec.gov/Archives/edgar/data/{int(cik)}"
         f"/{accession_nodash}/{primary_doc}"
     )
-    response = requests.get(doc_url, headers=SEC_HEADERS)
+    response = requests.get(doc_url, headers=SEC_HEADERS, timeout=EDGAR_TIMEOUT)
     response.raise_for_status()
     return response.text

@@ -2,7 +2,6 @@
 # The four tools are: resolve_filing_ids, vector_search_chunks, fetch_structured_signals, cite_and_answer.
 # cite_and_answer is the terminal tool — the agent loop exits when it is called.
 
-import os
 
 from psycopg2.extensions import connection
 

@@ -4,8 +4,8 @@
 # All conversions run ONLY when this run performed the rename, so re-running is a no-op.
 #
 # Usage: uv run python scripts/migrate_revenue_units.py
-import logging
 import json
+import logging
 import sys
 from pathlib import Path
 

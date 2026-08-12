@@ -12,6 +12,7 @@ from agents.advice import run_advice, run_analysis
 from agents.comparison import is_comparison_query, run_comparison
 from agents.orchestrator import run_orchestrator
 from agents.web_search import run_web_search, run_web_search_detailed
+from api.rate_limit import check_rate_limit
 from api.tasks import FRESHNESS_WINDOW_DAYS, ticker_is_ready
 from db.connection import get_connection
 from db.queries import get_latest_filing, get_signals_for_filings
@@ -88,6 +89,8 @@ def _resolve_filing_type(ticker: str, filing_type: str) -> str:
 
 @router.post("/chat")
 def chat(body: ChatRequest, request: Request):
+    # Every /chat request can trigger LLM spend — rate-limit before any model call.
+    check_rate_limit(request, "chat")
     # Maps typed LLM failures and loop timeouts to error responses. Pipeline failures surface
     # via /job/{id}.
     try:
@@ -107,7 +110,8 @@ def _chat(body: ChatRequest, request: Request):
         intent_type = body.intent or ("comparison" if is_comparison_query(body.query) else "single_analysis")
     else:
         intent = run_orchestrator(body.query)
-        ticker = intent.get("ticker", "").upper()
+        # The orchestrator can emit "ticker": null (e.g. "how are markets doing?") — guard before .upper().
+        ticker = (intent.get("ticker") or "").upper()
         filing_type = intent["filing_types"][0] if intent.get("filing_types") else "10-Q"
         intent_type = intent.get("intent")
 
@@ -129,7 +133,11 @@ def _chat(body: ChatRequest, request: Request):
         if not ticker:
             return {"type": "error", "message": "Please mention a specific publicly traded company (e.g. Apple, MSFT, Tesla)."}
 
-        if not ticker_is_ready(ticker, filing_type):
+        # A 4-quarter comparison needs 4 scored quarters — backfill history when only some exist.
+        # No infinite retry risk: the post-pipeline retry carries a hint intent with periods_needed=1,
+        # so a company with fewer filings than requested still gets an answer from what exists.
+        periods_needed = intent.get("periods_needed") or 1
+        if not ticker_is_ready(ticker, filing_type, min_filings=periods_needed):
             try:
                 cik = get_cik(ticker)
                 filings = get_10q_filings(cik, limit=1) if filing_type == "10-Q" else get_10k_filings(cik, limit=1)
@@ -145,13 +153,14 @@ def _chat(body: ChatRequest, request: Request):
                 run_full_pipeline,
                 ticker,
                 filing_type,
-                intent.get("periods_needed", 1),
+                periods_needed,
                 job_timeout=600,
             )
             return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type, "intent": intent_type}
 
         result = run_comparison(body.query)
-        return {"type": "comparison", **result}
+        # tool_trace is for the benchmark judge, not the API — serve only answer + citations.
+        return {"type": "comparison", "answer": result["answer"], "citations": result.get("citations", [])}
 
     # Guard: no ticker detected — ask user to specify a company.
     if not ticker:

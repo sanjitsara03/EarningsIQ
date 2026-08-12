@@ -154,15 +154,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Load extracted signals from DB for standalone testing
-    from db.queries import get_chunks_for_filing
-    import json as _json
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM signals WHERE filing_id = %s", (args.filing_id,))
-            row = cur.fetchone()
-            cols = [d[0] for d in cur.description]
-            extracted_signals = dict(zip(cols, row)) if row else {}
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM signals WHERE filing_id = %s", (args.filing_id,))
+        row = cur.fetchone()
+        cols = [d[0] for d in cur.description]
+        extracted_signals = dict(zip(cols, row)) if row else {}
 
     result = run_risk_scoring(args.filing_id, args.ticker, extracted_signals)
     print(json.dumps(result, indent=2))

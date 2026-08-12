@@ -29,3 +29,14 @@ markers = [
     "benchmark: runs the full agent pipeline + Tavily research + LLM judge (~$1); run explicitly with -m benchmark",
 ]
 addopts = "-m 'not capability and not benchmark'"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.2",
+]
+
+[tool.ruff.lint]
+# BLE001: broad excepts are deliberate at resilience boundaries (fail-open rate limiter, EDGAR
+# freshness fallback, never-raise benchmark extractors). DTZ011: naive local dates are fine for
+# filing-cadence math. SIM117: nested `with get_connection() / conn.cursor()` is house style.
+ignore = ["BLE001", "DTZ011", "SIM117"]

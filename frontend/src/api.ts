@@ -40,10 +40,17 @@ export interface AnalysisResponse {
   highlights: string[]
 }
 
+// Supporting evidence from cite_and_answer — a verbatim filing quote tagged with its period.
+export interface Citation {
+  period: string
+  section?: string
+  quote: string
+}
+
 export interface ComparisonResponse {
   type: 'comparison'
   answer: string
-  citations?: unknown[]
+  citations?: Citation[]
 }
 
 export interface WebSource {
@@ -90,11 +97,28 @@ export interface JobStatus {
 
 // --- API functions ---
 
+// Error carrying the HTTP status so callers can tell "not found" (expected absence) from real failures.
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options)
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(text || `HTTP ${res.status}`)
+    // FastAPI errors arrive as {"detail": "..."} — show the message, not the raw JSON.
+    let message = text || `HTTP ${res.status}`
+    try {
+      const body = JSON.parse(text)
+      if (typeof body.detail === 'string') message = body.detail
+    } catch {
+      /* not JSON — keep raw text */
+    }
+    throw new ApiError(res.status, message)
   }
   return res.json() as Promise<T>
 }
@@ -114,23 +138,27 @@ export function getJobStatus(jobId: string): Promise<JobStatus> {
   return request<JobStatus>(`/job/${jobId}`)
 }
 
-// GET /signals/{ticker} — returns the most recent extracted signals.
+// GET /signals/{ticker} — returns the most recent extracted signals, or null when none exist (404).
+// Any other failure propagates so the UI can surface it instead of silently rendering N/A.
 export async function getSignals(ticker: string, filingType = '10-Q'): Promise<SignalsData | null> {
   try {
     const data = await request<{ ticker: string; signals: SignalsData[] }>(`/signals/${ticker}?filing_type=${filingType}`)
     return data.signals?.[0] ?? null
-  } catch {
-    return null
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
   }
 }
 
-// GET /risk/{ticker} — returns the most recent risk score.
-export async function getRisk(ticker: string): Promise<RiskData | null> {
+// GET /risk/{ticker} — same 404-vs-failure contract as getSignals. filing_type must be forwarded,
+// otherwise 10-K-only tickers 404 under the backend's 10-Q default and lose their risk section.
+export async function getRisk(ticker: string, filingType = '10-Q'): Promise<RiskData | null> {
   try {
-    const data = await request<{ ticker: string; risk: RiskData }>(`/risk/${ticker}`)
+    const data = await request<{ ticker: string; risk: RiskData }>(`/risk/${ticker}?filing_type=${filingType}`)
     return data.risk ?? null
-  } catch {
-    return null
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
   }
 }
 

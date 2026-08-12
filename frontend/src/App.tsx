@@ -13,6 +13,7 @@ import {
   type SignalsData,
   type RiskData,
   type WebSource,
+  type Citation,
 } from './api'
 
 // --- Types ---
@@ -44,6 +45,7 @@ interface AdviceResult {
   keyPositives: string[]
   keyRisks: string[]
   disclaimer: string
+  dataWarnings: string[]
 }
 
 interface TextResult {
@@ -57,6 +59,7 @@ interface TextResult {
   }
   highlights?: string[]
   sources?: WebSource[]
+  citations?: Citation[]
 }
 
 type ResultData = AdviceResult | TextResult
@@ -98,6 +101,7 @@ function buildResult(
   advice: AdviceResponse,
   signals: SignalsData | null,
   risk: RiskData | null,
+  dataWarnings: string[] = [],
 ): AdviceResult {
   const revenueYoY = signals?.revenue_yoy_delta ?? null
   return {
@@ -135,6 +139,7 @@ function buildResult(
     keyPositives: advice.key_positives,
     keyRisks: advice.key_risks,
     disclaimer: advice.disclaimer,
+    dataWarnings,
   }
 }
 
@@ -156,6 +161,9 @@ function buildTextResult(res: ChatResponse): TextResult {
   }
   if (res.type === 'web') {
     return { kind: 'text', answer, sources: res.sources }
+  }
+  if (res.type === 'comparison') {
+    return { kind: 'text', answer, citations: res.citations }
   }
   return { kind: 'text', answer }
 }
@@ -465,7 +473,7 @@ function TextResultView({
   onResubmit: (q: string) => void
 }) {
   const [newQuery, setNewQuery] = useState('')
-  const { answer, provenance, highlights, sources } = result
+  const { answer, provenance, highlights, sources, citations } = result
 
   return (
     <div className="min-h-screen px-6 py-8 max-w-4xl mx-auto animate-slide-up">
@@ -553,6 +561,23 @@ function TextResultView({
         </div>
       )}
 
+      {citations && citations.length > 0 && (
+        <div className="max-w-2xl mb-10">
+          <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-3">Citations</p>
+          <ul className="flex flex-col gap-3">
+            {citations.map((c, i) => (
+              <li key={i} className="border-l-2 border-[#2d3748] pl-4">
+                <p className="font-mono text-xs text-[#4a5568] mb-1">
+                  {c.period}
+                  {c.section && <>&ensp;·&ensp;{c.section}</>}
+                </p>
+                <p className="font-body text-sm text-muted italic leading-relaxed">&ldquo;{c.quote}&rdquo;</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="border-t border-border pt-8">
         <QueryInput query={newQuery} setQuery={setNewQuery} onSubmit={onResubmit} compact />
       </div>
@@ -604,6 +629,17 @@ function AdviceResultView({
         </p>
         <p className="font-body text-[#3d4a5c] text-xs mt-1.5 italic">&ldquo;{query}&rdquo;</p>
       </div>
+
+      {/* Data-loading warnings — shown when signals/risk fetches failed (not for genuine 404s) */}
+      {result.dataWarnings.length > 0 && (
+        <div className="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-1">
+          {result.dataWarnings.map((w) => (
+            <p key={w} className="font-body text-xs text-amber-500">
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
 
       {/* Recommendation + Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-8 sm:gap-14 items-start mb-10">
@@ -740,12 +776,21 @@ export default function App() {
   const [pollingTicker, setPollingTicker] = useState('')
 
   // Fetches signals + risk and builds the full display result from an advice response.
+  // A failed fetch (anything but a 404) still renders the advice card, with a visible warning
+  // in place of silently showing N/A.
   const hydrateAdvice = async (advice: AdviceResponse) => {
+    const warnings: string[] = []
     const [signals, risk] = await Promise.all([
-      getSignals(advice.ticker, advice.filing_type),
-      getRisk(advice.ticker),
+      getSignals(advice.ticker, advice.filing_type).catch((): null => {
+        warnings.push('Financial metrics could not be loaded — the recommendation below is unaffected.')
+        return null
+      }),
+      getRisk(advice.ticker, advice.filing_type).catch((): null => {
+        warnings.push('The risk score could not be loaded.')
+        return null
+      }),
     ])
-    setResultData(buildResult(advice, signals, risk))
+    setResultData(buildResult(advice, signals, risk, warnings))
     setStatus('results')
   }
 

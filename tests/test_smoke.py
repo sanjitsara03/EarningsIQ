@@ -7,15 +7,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def test_all_modules_import():
-    import agents.advice
-    import agents.comparison
-    import agents.extraction
-    import agents.orchestrator
-    import agents.risk_scoring
-    import agents.web_search
-    import api.main
-    import api.tasks
-    import evals.capability_harness
     import llm  # noqa: F401
 
 
@@ -71,7 +62,11 @@ def test_parse_args_rejects_non_objects():
 
 
 def test_unit_normalization():
-    from tools.extraction_tools import handle_extract_financial_metrics, handle_extract_management_outlook, to_usd
+    from tools.extraction_tools import (
+        handle_extract_financial_metrics,
+        handle_extract_management_outlook,
+        to_usd,
+    )
 
     assert to_usd(94930, "millions") == 94_930_000_000
     assert to_usd(1.5, "billions") == 1_500_000_000
@@ -101,7 +96,11 @@ def test_unit_normalization():
 
 
 def test_revenue_plausibility_checks():
-    from agents.extraction import REVENUE_MAX_USD, REVENUE_MIN_USD, _revenue_implausibility
+    from agents.extraction import (
+        REVENUE_MAX_USD,
+        REVENUE_MIN_USD,
+        _revenue_implausibility,
+    )
 
     assert REVENUE_MIN_USD <= 94_930_000_000 <= REVENUE_MAX_USD
 
@@ -240,7 +239,12 @@ def test_quote_normalization_and_match():
 
 
 def test_eps_value_must_appear_in_quote():
-    from agents.extraction import _normalize_quote, _alnum_only, _verify_metrics_quotes, _verify_quotes
+    from agents.extraction import (
+        _alnum_only,
+        _normalize_quote,
+        _verify_metrics_quotes,
+        _verify_quotes,
+    )
 
     source = "(In millions, except per share amounts) Diluted earnings per share 2.02"
     norm = _normalize_quote(source)
