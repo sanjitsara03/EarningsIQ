@@ -1,5 +1,4 @@
-# Typed error taxonomy for all agent LLM calls. One import point for api/routes/chat.py and RQ:
-# adapter-level errors (transport/format) and agent-level errors (semantic guards) both live here.
+# Typed error taxonomy for all agent LLM calls — adapter transport/format errors and agent semantic guards.
 
 
 # Base class for all LLM-layer failures.

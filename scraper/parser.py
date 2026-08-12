@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-#Trying to find sections in filings using regex patterns. 
 PATTERNS_10Q = {
     "financials": [
         r"item\s+1[\.\s\xa0]+financial\s+statements",
@@ -70,9 +69,7 @@ _FINANCIALS_FALLBACK_10K = [
 # A found 10-Q financials section shorter than this is treated as missing.
 _MIN_FINANCIALS_CHARS_10Q = 1000
 
-# Statement-title anchors for 10-Qs whose "Item 1" heading sits too close to the TOC and gets
-# rejected by _is_toc_entry. Order is load-bearing: the operations/income statement carries the
-# EPS line — anchoring on comprehensive income or balance sheets would slice past it.
+# Anchors for TOC-rejected Item 1 headings; order is load-bearing — the operations statement carries the EPS line.
 _FINANCIALS_FALLBACK_10Q = [
     r"(?:condensed\s+)?consolidated\s+statements?\s+of\s+operations",
     r"(?:condensed\s+)?consolidated\s+statements?\s+of\s+income",
@@ -102,7 +99,7 @@ def _find_section(plain: str, patterns: list[str]) -> int | None:
                 return m.start()
     return None
 
-# For 10-K filings, the financial statements section (Item 8) is often just a stub.This function detects that case and tries to locate the actual financial statements using fallback anchor patterns.
+# 10-K Item 8 is often a cross-reference stub — re-anchor financials on the real statements.
 def _fix_financials_stub(plain: str, positions: dict) -> None:
     """
     Mutates `positions` in-place.
@@ -117,7 +114,6 @@ def _fix_financials_stub(plain: str, positions: dict) -> None:
     if fin_pos is None:
         stub_detected = True          # Item 8 was filtered as TOC; need fallback
     else:
-        # Peek at how much content is actually in this section
         ordered = sorted(positions.items(), key=lambda x: x[1])
         for i, (name, start) in enumerate(ordered):
             if name == "financials":
@@ -138,9 +134,7 @@ def _fix_financials_stub(plain: str, positions: dict) -> None:
                 positions["financials"] = m.start()
                 return
 
-# For 10-Q filings whose real "Item 1. Financial Statements" heading sits right after the TOC
-# (and is therefore rejected by _is_toc_entry), anchor the financials section on the statement
-# titles instead. Additive: when a substantial financials section was already found, this is a no-op.
+# Re-anchors a TOC-rejected 10-Q financials heading on statement titles; no-op if a substantial one was found.
 def _fix_financials_missing_10q(plain: str, positions: dict) -> None:
     fin_pos = positions.get("financials")
     if fin_pos is not None:
@@ -152,9 +146,7 @@ def _fix_financials_missing_10q(plain: str, positions: dict) -> None:
                     return
                 break
 
-    # The anchor must precede every other found section: statements come first in a 10-Q, and
-    # prose references ("see our condensed consolidated statements of operations") or exhibit-index
-    # lines near EOF must never win.
+    # The anchor must precede every other found section — kills prose references and EOF exhibit-index lines.
     others = [pos for name, pos in positions.items() if name != "financials"]
     limit = min(others) if others else len(plain)
     for pat in _FINANCIALS_FALLBACK_10Q:
@@ -174,24 +166,19 @@ def parse_sections(text: str, filing_type: str) -> dict:
     patterns = PATTERNS_10Q if filing_type == "10-Q" else PATTERNS_10K
     output_keys = OUTPUT_SECTIONS_10Q if filing_type == "10-Q" else OUTPUT_SECTIONS_10K
 
-    # find the first non-TOC match for each section
     positions = {}
     for name, pattern_list in patterns.items():
         pos = _find_section(plain, pattern_list)
         if pos is not None:
             positions[name] = pos
 
-    # for 10-K, replace stub Item 8 with the actual financial statements;
-    # for 10-Q, recover a financials section whose heading was rejected as a TOC entry
     if filing_type == "10-K":
         _fix_financials_stub(plain, positions)
     else:
         _fix_financials_missing_10q(plain, positions)
 
-    # sort found sections by position in the document
     ordered = sorted(positions.items(), key=lambda x: x[1])
 
-    # slice content between consecutive section boundaries
     raw_sections = {}
     for i, (name, start) in enumerate(ordered):
         end = ordered[i + 1][1] if i + 1 < len(ordered) else len(plain)

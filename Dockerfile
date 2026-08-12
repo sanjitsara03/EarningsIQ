@@ -14,11 +14,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Install Python dependencies
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-dev
 
-# Copy source and built frontend
 COPY . .
 COPY --from=frontend-builder /frontend/dist ./dist
 

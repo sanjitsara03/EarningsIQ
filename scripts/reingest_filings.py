@@ -1,5 +1,4 @@
-# Deletes a ticker's filings (CASCADE wipes chunks, signals, and risk scores) and re-runs the
-# full pipeline so they are re-fetched, re-parsed, re-embedded, re-extracted, and re-scored.
+# Deletes a ticker's filings (CASCADE wipes chunks/signals/risk scores) and re-runs the full pipeline.
 # Use after a parser or extraction fix that invalidates stored chunks.
 #
 # Usage: uv run python scripts/reingest_filings.py AAPL --type 10-Q
@@ -43,8 +42,7 @@ def main() -> None:
 
     from api.tasks import run_full_pipeline
 
-    # Note: this fetches the N NEWEST filings from EDGAR, which can differ from the deleted set
-    # when newer filings exist — the window shifts forward, which is what a demo wants.
+    # Fetches the N NEWEST from EDGAR, which can differ from the deleted set — the window shifts forward.
     logger.info(f"Re-ingesting the {max(len(rows), 1)} newest {args.filing_type} filing(s) from EDGAR.")
     result = run_full_pipeline(ticker, args.filing_type, limit=max(len(rows), 1))
     logger.info(f"Re-ingest complete: {result}")

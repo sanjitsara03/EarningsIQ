@@ -1,7 +1,5 @@
-# Capability harness: probes every (model, provider-pin) pair in llm/config.py for the exact
-# capabilities each agent depends on. Provider capability drifts weekly on OpenRouter, so this is
-# a permanent, re-runnable gate — run it before migrating an agent, before demos, and after any
-# provider incident. A full run costs a few cents.
+# Capability harness: probes every (model, provider-pin) pair in llm/config.py for the capabilities each
+# agent depends on. Provider capability drifts weekly on OpenRouter — re-run before migrations and demos.
 #
 # Usage:
 #   uv run python -m evals.capability_harness                    # full matrix
@@ -184,8 +182,7 @@ def probe_forced_tools(agent: str, mechanism: str) -> dict:
                 tools = to_openai_tools([t for t in FAKE_STEP_TOOLS if t["name"] == tool_name])
                 tool_choice = "required"
 
-            # gpt-5.2 endpoints do not declare parallel_tool_calls; sending it with
-            # require_parameters=true returns a routing 404.
+            # gpt-5.2 endpoints don't declare parallel_tool_calls; sending it with require_parameters=true 404s.
             resp = chat(agent, messages, tools=tools, tool_choice=tool_choice)
             provider_served = resp.provider or provider_served
             prompt_toks += resp.prompt_tokens

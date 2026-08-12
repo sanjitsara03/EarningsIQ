@@ -1,10 +1,8 @@
-// Typed API client for the EarningsAgentIQ FastAPI backend.
-// In development, requests go through the Vite proxy at /api → http://localhost:8000.
-// In production, set VITE_API_URL to the Railway backend URL.
+// Typed API client; in dev, requests go through the Vite proxy at /api → http://localhost:8000.
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
 
-// --- Response types (mirror the Python Pydantic models) ---
+// Response types mirror the Python Pydantic models.
 
 export interface AdviceResponse {
   type: 'advice'
@@ -95,8 +93,6 @@ export interface JobStatus {
   result: unknown | null
 }
 
-// --- API functions ---
-
 // Error carrying the HTTP status so callers can tell "not found" (expected absence) from real failures.
 export class ApiError extends Error {
   status: number
@@ -123,8 +119,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-// POST /chat — main query endpoint. Returns one of 4 response types.
-// Pass hint to skip the orchestrator when ticker/filing_type are already known (e.g. after pipeline retry).
+// Pass hint to skip the orchestrator when ticker/filing_type are already known (pipeline retry).
 export function chat(query: string, hint?: { ticker: string; filing_type: string; intent?: string }): Promise<ChatResponse> {
   return request<ChatResponse>('/chat', {
     method: 'POST',
@@ -133,13 +128,11 @@ export function chat(query: string, hint?: { ticker: string; filing_type: string
   })
 }
 
-// GET /job/{id} — polls an RQ background job.
 export function getJobStatus(jobId: string): Promise<JobStatus> {
   return request<JobStatus>(`/job/${jobId}`)
 }
 
-// GET /signals/{ticker} — returns the most recent extracted signals, or null when none exist (404).
-// Any other failure propagates so the UI can surface it instead of silently rendering N/A.
+// Returns the latest signals, or null only on 404; other failures propagate so the UI can surface them.
 export async function getSignals(ticker: string, filingType = '10-Q'): Promise<SignalsData | null> {
   try {
     const data = await request<{ ticker: string; signals: SignalsData[] }>(`/signals/${ticker}?filing_type=${filingType}`)
@@ -150,8 +143,7 @@ export async function getSignals(ticker: string, filingType = '10-Q'): Promise<S
   }
 }
 
-// GET /risk/{ticker} — same 404-vs-failure contract as getSignals. filing_type must be forwarded,
-// otherwise 10-K-only tickers 404 under the backend's 10-Q default and lose their risk section.
+// Same 404-vs-failure contract as getSignals; filing_type must be forwarded or 10-K-only tickers 404.
 export async function getRisk(ticker: string, filingType = '10-Q'): Promise<RiskData | null> {
   try {
     const data = await request<{ ticker: string; risk: RiskData }>(`/risk/${ticker}?filing_type=${filingType}`)
@@ -162,7 +154,6 @@ export async function getRisk(ticker: string, filingType = '10-Q'): Promise<Risk
   }
 }
 
-// Polls a job every 3 seconds until it finishes or fails.
 export async function pollJob(jobId: string): Promise<void> {
   while (true) {
     await sleep(3000)

@@ -35,7 +35,6 @@ def _embed_batch_throttled(texts: list[str]) -> list[list[float]]:
 
 
 def main() -> None:
-    # Probe the model for its output dimension.
     dim = len(embed_query("dimension probe"))
     logger.info(f"{EMBED_MODEL} produces {dim}-dim vectors.")
 

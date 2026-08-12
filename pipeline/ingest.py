@@ -23,8 +23,7 @@ _splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
 )
 
 
-# Insert a batch of chunks (with embeddings) into the chunks table.
-# Embedding is stringified to the format pgvector expects.
+# Embeddings are stringified to the literal format pgvector expects.
 def _insert_chunks(conn, filing_id: int, chunks: list[dict]) -> None:
     with conn.cursor() as cur:
         for chunk in chunks:
@@ -38,8 +37,7 @@ def _insert_chunks(conn, filing_id: int, chunks: list[dict]) -> None:
             )
 
 
-# Core pipeline for a single filing: chunk → embed → insert → update status.
-# Returns the new filing_id, or None if the filing was already ingested.
+# Chunk → embed → insert → update status; returns the new filing_id, or None if already ingested.
 def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> int | None:
     with get_connection() as conn:
         if filing_exists(conn, filing["accession"]):
@@ -63,7 +61,6 @@ def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> in
         )
         logger.info(f"Inserted filing id={filing_id}.")
 
-        # Chunk all sections and track which section each chunk came from.
         all_chunks = []
         chunk_index = 0
         for section, text in sections.items():
@@ -79,7 +76,6 @@ def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> in
 
         logger.info(f"Split into {len(all_chunks)} chunks. Embedding...")
 
-        # Embed all chunk contents in batched API calls.
         texts = [c["content"] for c in all_chunks]
         embeddings = embed_documents(texts)
         for chunk, embedding in zip(all_chunks, embeddings):
@@ -91,8 +87,7 @@ def _process_filing(filing: dict, ticker: str, cik: str, filing_type: str) -> in
         return filing_id
 
 
-# Main entry point. Fetches and ingests all filings for a ticker and filing type.
-# Returns the filing_ids that were newly ingested this run (already-ingested and failed filings are excluded).
+# Returns only the filing_ids newly ingested this run (already-ingested and failed filings are excluded).
 def ingest(ticker: str, filing_type: str = "10-Q", limit: int = 5) -> list[int]:
     logger.info(f"Starting ingestion: {ticker} {filing_type} (limit={limit})")
     cik = get_cik(ticker)

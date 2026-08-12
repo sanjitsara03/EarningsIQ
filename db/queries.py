@@ -1,11 +1,9 @@
-# Data access layer for the filings table.
-# All functions take a psycopg2 connection
+# Data access layer; all functions take a psycopg2 connection.
 import json
 
 from psycopg2.extensions import connection
 
 
-# Inserts a new row into the filings table and returns the generated id.
 def insert_filing(
     conn: connection,
     ticker: str,
@@ -28,7 +26,6 @@ def insert_filing(
         return cur.fetchone()[0]
 
 
-# Checks whether a filing with this accession number already exists. Used as a dedup guard before fetching.
 def filing_exists(conn: connection, accession: str) -> bool:
     """Return True if this accession number is already in the filings table."""
     with conn.cursor() as cur:
@@ -39,7 +36,6 @@ def filing_exists(conn: connection, accession: str) -> bool:
         return cur.fetchone() is not None
 
 
-# Returns the current pipeline status for a filing, or None if the accession isn't found.
 def get_filing_status(conn: connection, accession: str) -> str | None:
     """Return the pipeline status for this accession, or None if not found."""
     with conn.cursor() as cur:
@@ -61,8 +57,7 @@ def get_chunks_for_filing(conn: connection, filing_id: int) -> list[dict]:
         return [{"section": row[0], "content": row[1]} for row in cur.fetchall()]
 
 
-# Inserts extracted signals into the signals table. JSONB fields are serialized from Python objects.
-# Upserts on filing_id; re-runs are idempotent.
+# Upserts extracted signals on filing_id so re-runs are idempotent.
 def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
     fm = results.get("extract_financial_metrics", {})
     outlook = results.get("extract_management_outlook", {})
@@ -105,9 +100,7 @@ def insert_signals(conn: connection, filing_id: int, results: dict) -> None:
         )
 
 
-# Fetches past signals for a ticker ordered by period descending, optionally excluding one filing
-# (the one currently being processed). Used as a historical baseline by risk scoring and the
-# extraction plausibility guard.
+# Historical baseline for risk scoring and the plausibility guard; optionally excludes the filing in flight.
 def get_historical_signals(conn: connection, ticker: str, exclude_filing_id: int | None = None) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(
@@ -139,8 +132,7 @@ def get_filing_statuses(conn: connection, filing_ids: list[int]) -> dict[int, st
         return dict(cur.fetchall())
 
 
-# Inserts a completed risk score row into the risk_scores table.
-# Upserts on filing_id; re-runs are idempotent.
+# Upserts a risk score row on filing_id so re-runs are idempotent.
 def insert_risk_score(
     conn: connection,
     filing_id: int,
@@ -180,7 +172,6 @@ def insert_risk_score(
         )
 
 
-# Returns the ticker for a filing id, or None if the filing doesn't exist.
 def get_filing_ticker(conn: connection, filing_id: int) -> str | None:
     with conn.cursor() as cur:
         cur.execute("SELECT ticker FROM filings WHERE id = %s", (filing_id,))
@@ -188,8 +179,7 @@ def get_filing_ticker(conn: connection, filing_id: int) -> str | None:
         return row[0] if row else None
 
 
-# Returns the most recent filing row for a ticker and filing type, or None if we've never ingested one.
-# Used for freshness checks (compare filed_at/accession against EDGAR) and for showing the filing date in results.
+# Most recent filing for a ticker + type, or None; used for freshness checks and result provenance.
 def get_latest_filing(conn: connection, ticker: str, filing_type: str) -> dict | None:
     with conn.cursor() as cur:
         cur.execute(
@@ -207,7 +197,6 @@ def get_latest_filing(conn: connection, ticker: str, filing_type: str) -> dict |
         return dict(zip(["id", "period", "filed_at", "accession"], row))
 
 
-# Returns filing IDs for a ticker and filing type, ordered by period descending. Used by the Comparison Agent.
 def get_filing_ids_for_ticker(conn: connection, ticker: str, filing_type: str, limit: int = 4) -> list[int]:
     with conn.cursor() as cur:
         cur.execute(
@@ -222,7 +211,6 @@ def get_filing_ids_for_ticker(conn: connection, ticker: str, filing_type: str, l
         return [row[0] for row in cur.fetchall()]
 
 
-# Returns signals rows for a list of filing IDs, joined with period and ticker for context.
 def get_signals_for_filings(conn: connection, filing_ids: list[int]) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(

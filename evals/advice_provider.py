@@ -1,5 +1,4 @@
-# Promptfoo provider for the Advice agent.
-# Accepts pre-built signals and risk data as vars so no DB is needed.
+# Promptfoo provider for the Advice agent; signals/risk data come in as vars so no DB is needed.
 
 import json
 import os

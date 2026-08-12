@@ -1,5 +1,4 @@
-# Per-agent model configuration for OpenRouter. This is the single source of truth for which
-# model serves each agent — the capability harness in evals/ probes exactly these configs.
+# Single source of truth for which model serves each agent; the capability harness probes these configs.
 import json
 import os
 from dataclasses import dataclass
@@ -7,8 +6,7 @@ from dataclasses import dataclass
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
-# Frozen per-agent LLM settings. `provider` is OpenRouter's routing object (sent via extra_body);
-# `extra` holds additional extra_body keys (e.g. reasoning effort for OpenAI models).
+# `provider` is OpenRouter's routing object (sent via extra_body); `extra` holds additional extra_body keys.
 @dataclass(frozen=True)
 class AgentLLMConfig:
     model: str
@@ -17,7 +15,7 @@ class AgentLLMConfig:
     extra: dict | None = None
 
 
-# Per-agent model registry. Risk scoring pins the first-party OpenAI provider with fallbacks disabled.
+# Risk scoring pins the first-party OpenAI provider with fallbacks disabled.
 AGENT_MODELS: dict[str, AgentLLMConfig] = {
     "orchestrator": AgentLLMConfig(
         model="google/gemini-3-flash-preview",
@@ -49,8 +47,7 @@ AGENT_MODELS: dict[str, AgentLLMConfig] = {
         max_tokens=1024,
         provider={"require_parameters": True},
     ),
-    # Analyst-benchmark roles. The judge is a different model family than the sonnet-written
-    # advice/comparison outputs it grades.
+    # Benchmark roles; the judge is a different model family than the sonnet-written outputs it grades.
     "benchmark_judge": AgentLLMConfig(
         model="openai/gpt-5.2",
         max_tokens=8192,  # includes reasoning tokens
@@ -65,9 +62,7 @@ AGENT_MODELS: dict[str, AgentLLMConfig] = {
 }
 
 
-# Resolves the config for an agent, applying env overrides:
-# LLM_MODEL_<AGENT>, LLM_MAX_TOKENS_<AGENT>, LLM_PROVIDER_<AGENT> (JSON string).
-# A model override drops the stored provider pin and extra unless LLM_PROVIDER_<AGENT> is also set.
+# Applies LLM_*_<AGENT> env overrides; a model override drops the stored provider pin and extra.
 def get_agent_config(agent: str) -> AgentLLMConfig:
     cfg = AGENT_MODELS[agent]
     key = agent.upper()

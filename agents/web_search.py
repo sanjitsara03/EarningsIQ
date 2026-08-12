@@ -1,6 +1,4 @@
-# The web search agent runs when a question needs current information that isn't in SEC filings
-# things like recent news, analyst sentiment, or current stock price.
-# It uses Tavily as its only tool and returns a plain text summary.
+# Web Search Agent — Tavily-backed answers for current info not found in filings (news, sentiment, price).
 
 import logging
 import os
@@ -72,10 +70,7 @@ def _run_tavily_search(query: str) -> tuple[list[dict], str]:
 OPENAI_TOOLS = to_openai_tools([TAVILY_TOOL])
 
 
-# Standard tool loop that runs until the LLM stops calling tools and returns a text summary.
-# The first turn forces a search; at MAX_TURNS, one final call with tools disabled forces a text answer.
-# Returns the summary plus every source consulted (deduped by URL), so callers can surface
-# citations and evaluators can trace grounding.
+# Turn 0 forces a search; at MAX_TURNS a tools-off call forces text; sources deduped by URL for citations.
 @traced("web_search")
 def run_web_search_detailed(query: str) -> tuple[str, list[dict]]:
     system = SYSTEM_PROMPT_TEMPLATE.format(today=date.today().strftime("%B %d, %Y"))
@@ -100,7 +95,6 @@ def run_web_search_detailed(query: str) -> tuple[str, list[dict]]:
             tool_choice="required" if turn == 0 else None,
         )
 
-        # No tool calls means the LLM is done — return the text summary.
         if not resp.tool_calls:
             return resp.text or "", list(sources.values())
 

@@ -1,10 +1,6 @@
-# Query set for the analyst benchmark. Each query runs through the real agent pipeline and is
-# scored against fresh professional research.
-#
-# Adding a query: append a BenchmarkQuery to QUERIES with a unique id. Constraint — comparison
-# queries must match COMPARISON_TRIGGERS in agents/comparison.py (e.g. "year over year",
-# "compare", "vs") or the chat routing will send them down the advice path; single_analysis
-# wording must AVOID those trigger words.
+# Analyst-benchmark query set — each query runs through the real agent pipeline.
+# Comparison wording must match COMPARISON_TRIGGERS (agents/comparison.py) and single_analysis
+# wording must avoid those trigger words, or the chat routing misroutes them.
 from dataclasses import dataclass, field
 
 INTENTS = {"single_analysis", "comparison", "advice", "web_only"}
@@ -31,7 +27,6 @@ def default_research_queries(ticker: str) -> list[str]:
 
 
 QUERIES: list[BenchmarkQuery] = [
-    # --- advice ---
     BenchmarkQuery(
         id="aapl_advice", query="Should I buy Apple stock right now?",
         ticker="AAPL", filing_type="10-Q", intent_expectation="advice",
@@ -52,7 +47,6 @@ QUERIES: list[BenchmarkQuery] = [
         ticker="ORCL", filing_type="10-Q", intent_expectation="advice",
         judge_focus="Fresh-ingest ticker. Weight cloud backlog (RPO) coverage.",
     ),
-    # --- single_analysis ---
     BenchmarkQuery(
         id="nvda_single", query="How did NVIDIA do in its most recent quarterly filing?",
         ticker="NVDA", filing_type="10-Q", intent_expectation="single_analysis",
@@ -73,7 +67,6 @@ QUERIES: list[BenchmarkQuery] = [
         ticker="MSFT", filing_type="10-Q", intent_expectation="single_analysis",
         judge_focus="Balanced coverage: revenue, margins, segments, guidance.",
     ),
-    # --- comparison (wording must hit COMPARISON_TRIGGERS) ---
     BenchmarkQuery(
         id="msft_comparison", query="How has Microsoft's revenue changed year over year?",
         ticker="MSFT", filing_type="10-Q", intent_expectation="comparison",
@@ -84,7 +77,6 @@ QUERIES: list[BenchmarkQuery] = [
         ticker="NVDA", filing_type="10-Q", intent_expectation="comparison",
         judge_focus="Margin direction and magnitude accuracy.",
     ),
-    # --- web_only ---
     BenchmarkQuery(
         id="nvda_web", query="What is the latest analyst sentiment on NVIDIA stock?",
         ticker="NVDA", filing_type="10-Q", intent_expectation="web_only",

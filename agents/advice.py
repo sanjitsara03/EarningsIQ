@@ -1,6 +1,4 @@
-# The Advice Agent is the final step in the pipeline. It takes everything gathered 
-# extracted signals, risk score, and optional web search results and synthesizes
-# a buy/hold/sell recommendation.
+# Advice Agent — final pipeline step: synthesizes signals, risk score, and web results into buy/hold/sell.
 
 import json
 import logging
@@ -97,8 +95,7 @@ ADVICE_SCHEMA = AdviceOutput.model_json_schema()
 ANALYSIS_SCHEMA = AnalysisOutput.model_json_schema()
 
 
-# Builds the user prompt from all available inputs. filing_type/period ground the framing
-# rules in DATA_RULES; query is the user's literal question (analysis route only).
+# Builds the user prompt; filing_type/period ground the DATA_RULES framing, query only on the analysis route.
 def _build_prompt(
     ticker: str,
     extracted_signals: dict,
@@ -132,8 +129,7 @@ def _build_prompt(
     return "\n".join(parts)
 
 
-# Shared call-validate-retry loop for both output shapes. One corrective retry on validation
-# failure, then LLMOutputError.
+# Shared call-validate-retry loop: one corrective retry on validation failure, then LLMOutputError.
 def _chat_validated(prompt: str, system: str, schema_name: str, schema: dict, model_cls):
     messages = [user_msg(prompt)]
     data: dict = {}
@@ -193,7 +189,6 @@ if __name__ == "__main__":
 
     ticker = sys.argv[1] if len(sys.argv) > 1 else "MSFT"
 
-    # Load signals and risk score from DB for standalone testing
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """

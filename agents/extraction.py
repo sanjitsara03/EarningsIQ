@@ -25,9 +25,7 @@ from llm import (
 )
 from tools.extraction_tools import TOOL_HANDLERS, TOOLS
 
-# Extreme tripwire for unit-CLASS errors only (a millions figure stored as dollars shifts values
-# by x1e6). Company-specific revenue scale is checked adaptively in _revenue_implausibility —
-# these bounds intentionally say nothing about what "normal" revenue looks like.
+# Tripwire for unit-CLASS errors only (x1e6 shifts); company-relative scale lives in _revenue_implausibility.
 REVENUE_MIN_USD = 1e4   # $10K
 REVENUE_MAX_USD = 5e12  # $5T
 
@@ -71,13 +69,7 @@ class ExtractionTimeoutError(Exception):
     pass
 
 
-# Returns a description of why the normalized revenue looks wrong, or None if it's plausible.
-# The checks are company-relative, so no assumption about a "normal" revenue range is made:
-#   1. Segment cross-check — segments carry their own independently-cited unit and must roughly
-#      sum to total revenue. Works on a first-ever extraction; a unit error on either side
-#      shifts the ratio by ~x1000.
-#   2. Prior-period ratio — this ticker's own history (current filing's row excluded).
-#   3. Extreme absolute tripwire — catches unit-class errors when neither adaptive check has data.
+# Returns why the revenue looks wrong, or None; all checks are company-relative, never a "normal revenue" range.
 def _revenue_implausibility(filing_id: int, results: dict) -> str | None:
     revenue_usd = results["extract_financial_metrics"].get("revenue_usd")
     if revenue_usd is None:
@@ -110,22 +102,18 @@ _QUOTE_TRANSLATION = str.maketrans({
 })
 
 
-# Canonical form for verbatim-quote comparison: typographic characters flattened, case folded,
-# whitespace runs collapsed.
+# Canonical form for quote comparison: typographic chars flattened, casefolded, whitespace collapsed.
 def _normalize_quote(s: str) -> str:
     s = s.translate(_QUOTE_TRANSLATION).casefold()
     return re.sub(r"\s+", " ", s).strip()
 
 
-# Second-stage form: alphanumerics only. Tolerates dropped punctuation ("$ 1.84" vs "$1.84")
-# while still requiring every word in sequence.
+# Second-stage form: alphanumerics only — tolerates dropped punctuation but still requires every word in sequence.
 def _alnum_only(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
 
-# True when the quote appears in the source the model was shown, anchored at token boundaries —
-# an unanchored substring test would let "1,84" verify against "21,845". Deterministic two-stage
-# match; no fuzzy matching, since near-miss acceptance would defeat the purpose.
+# Token-boundary anchored ("1,84" must not verify against "21,845"); deterministic two-stage match, never fuzzy.
 def _quote_in_source(quote, norm_source: str, alnum_source: str) -> bool:
     if not quote or not str(quote).strip():
         return False
@@ -133,14 +121,11 @@ def _quote_in_source(quote, norm_source: str, alnum_source: str) -> bool:
     if norm and re.search(rf"(?<![a-z0-9]){re.escape(norm)}(?![a-z0-9])", norm_source):
         return True
     alnum = _alnum_only(norm)
-    # A quote that normalizes to nothing has no verifiable content, and boundary padding keeps
-    # token sequences intact ("1 84" must not match inside "21 845").
+    # A quote that normalizes to nothing is unverifiable; space padding keeps token sequences intact.
     return bool(alnum) and f" {alnum} " in f" {alnum_source} "
 
 
-# True when the numeric value appears as a token sequence inside the quote text (e.g. eps 2.02
-# inside "Diluted earnings per share $ 2.02"). Binds the reported figure to its citation — a real
-# quote paired with a different number must not verify.
+# Binds the reported figure to its citation — a real quote paired with a different number must not verify.
 def _number_in_text(value, text: str) -> bool:
     if value is None or not text:
         return False
@@ -149,10 +134,7 @@ def _number_in_text(value, text: str) -> bool:
     return any(f" {_alnum_only(_normalize_quote(c))} " in alnum_text for c in candidates)
 
 
-# Verifies the metrics tool's quotes. Both failures route through the corrective-retry path as
-# problem strings. After the retry (drop_unverified_eps=True) an eps failure degrades to dropping
-# the field — eps is legitimately optional — while unit_quote stays hard: it justifies
-# revenue_usd, which must never be persisted uncited.
+# After the retry an eps failure drops the field (eps is optional); unit_quote stays hard — it justifies revenue_usd.
 def _verify_metrics_quotes(
     results: dict, norm_source: str, alnum_source: str, *, drop_unverified_eps: bool = False
 ) -> str | None:
@@ -176,9 +158,7 @@ def _verify_metrics_quotes(
     return "; ".join(problems) or None
 
 
-# Verifies every quote-bearing field against the text the model was shown, applying the soft
-# policies in place (drop unverifiable items/fields with a warning). Returns a retryable problem
-# string for unit_quote/eps_quote failures, or None.
+# Verifies all quote fields against the text the model saw; returns a retryable problem string or None.
 def _verify_quotes(results: dict, source_text: str) -> str | None:
     norm_source = _normalize_quote(source_text)
     alnum_source = _alnum_only(norm_source)
@@ -190,10 +170,7 @@ def _verify_quotes(results: dict, source_text: str) -> str | None:
             logger.warning(f"Dropping risk factor with unverifiable quote: {r.get('label')!r}")
     results["extract_risk_factors"] = kept
 
-    # The outlook's substance (guidance figure, withdrawn flag, period) is only as good as its
-    # quote. A missing, empty, or unverifiable quote voids all of it — an empty quote must not
-    # slip guidance through, and a fabricated "we withdrew guidance" must not survive its
-    # rejected citation.
+    # A missing or unverifiable outlook quote voids all guidance substance, including the withdrawn flag.
     outlook = results.get("extract_management_outlook") or {}
     has_substance = outlook.get("guidance_revenue_usd") is not None or outlook.get("withdrawn")
     if has_substance and not _quote_in_source(outlook.get("verbatim_quote"), norm_source, alnum_source):
@@ -213,8 +190,7 @@ def _verify_quotes(results: dict, source_text: str) -> str | None:
     return _verify_metrics_quotes(results, norm_source, alnum_source)
 
 
-# Runs a tool handler, converting schema-violating arguments (missing keys, unknown units) into
-# a typed error instead of an untyped crash.
+# Converts schema-violating tool args (missing keys, unknown units) into a typed LLMOutputError.
 def _run_handler(tool_name: str, args: dict) -> dict:
     try:
         return TOOL_HANDLERS[tool_name](args)
@@ -237,8 +213,7 @@ def _build_prompt(chunks: list[dict]) -> str:
     return "\n".join(parts)
 
 
-# Runs the tool-collection loop for a single filing. Exits when all 5 tools have fired or MAX_TURNS is reached.
-# Returns the collected results dict and persists signals to the DB.
+# Tool-collection loop: all 5 tools must fire within MAX_TURNS; persists signals and returns the results dict.
 @traced("extraction")
 def run_extraction(filing_id: int) -> dict:
     with get_connection() as conn:
@@ -259,7 +234,6 @@ def run_extraction(filing_id: int) -> dict:
 
         before = len(results)
         for tc in resp.tool_calls:
-            # Unknown tool names are a hard failure.
             if tc.name not in TOOL_HANDLERS:
                 raise WrongToolError("extraction", "one of the five extraction tools", tc.name)
             if tc.name not in results:
@@ -289,10 +263,7 @@ def run_extraction(filing_id: int) -> dict:
             f"Extraction incomplete after {MAX_TURNS} turns. Missing: {missing}"
         )
 
-    # Quote verification (soft drops applied in place; unit_quote failure is hard) runs before the
-    # plausibility guard so the retry message names the more fundamental defect. Either hard
-    # problem gets one corrective re-extraction of the metrics, then a hard error — an
-    # unverifiable or off-by-a-million figure must never be persisted.
+    # Quote verification precedes plausibility so the retry names the deeper defect; one retry, then hard error.
     hard_problem = _verify_quotes(results, prompt_text)
     problem = hard_problem or _revenue_implausibility(filing_id, results)
     if problem:
@@ -313,8 +284,7 @@ def run_extraction(filing_id: int) -> dict:
         tc = resp.tool_calls[0]
         if tc.name != "extract_financial_metrics":
             raise WrongToolError("extraction", "extract_financial_metrics", tc.name)
-        # Merge over the first pass so optional fields it captured (eps, margins) survive a
-        # retry that only re-reports the revenue figure.
+        # Merge over the first pass so optional fields (eps, margins) survive a revenue-only retry.
         retry_metrics = _run_handler(tc.name, tc.args)
         results["extract_financial_metrics"] = {
             **results["extract_financial_metrics"],

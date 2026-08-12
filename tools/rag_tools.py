@@ -1,6 +1,4 @@
-# Tool schemas, handlers, and vector search utilities for the Comparison Agent.
-# The four tools are: resolve_filing_ids, vector_search_chunks, fetch_structured_signals, cite_and_answer.
-# cite_and_answer is the terminal tool — the agent loop exits when it is called.
+# Comparison Agent tool schemas + handlers; cite_and_answer is the terminal tool — the loop exits on it.
 
 
 from psycopg2.extensions import connection
@@ -73,7 +71,6 @@ TOOLS = [
 ]
 
 
-# Embeds a query string using the shared model (voyage-finance-2). Returns a list of 1024 floats.
 def embed_query(text: str) -> list[float]:
     return _embed_query(text)
 

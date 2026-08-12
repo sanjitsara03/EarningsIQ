@@ -15,8 +15,7 @@ from api.routes import chat, ingest, jobs, risk, signals
 
 load_dotenv()
 
-# Surface agent/pipeline logs (quote-verification warnings, extraction progress) in prod output.
-# No-op if the root logger is already configured; uvicorn's own loggers are unaffected.
+# Surface agent/pipeline logs in prod output; no-op if the root logger is already configured.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 app = FastAPI(title="EarningsAgentIQ", version="1.0.0")
@@ -33,7 +32,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Redis connection and RQ queue — shared across routes via app.state.
 redis_conn = Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
 task_queue = Queue(connection=redis_conn)
 

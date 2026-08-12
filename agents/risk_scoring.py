@@ -39,7 +39,6 @@ Base your scores on concrete evidence: margin trends, guidance changes, risk fac
 Do not call the next tool until the previous one has returned."""
 
 
-# Formats extracted signals as a readable prompt section for the LLM.
 def _build_prompt(ticker: str, extracted_signals: dict) -> str:
     return f"""Company: {ticker}
 
@@ -63,12 +62,10 @@ def _format_historical(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# Forces one step's named tool and verifies the model called it. One corrective retry, then
-# WrongToolError.
+# Forces the step's named tool and verifies the model called it; one corrective retry, then WrongToolError.
 def _forced_step(tool_name: str, messages: list[dict]):
     for attempt in range(2):
-        # gpt-5.2 endpoints do not declare parallel_tool_calls; sending it with
-        # require_parameters=true returns a routing 404.
+        # gpt-5.2 endpoints don't declare parallel_tool_calls; sending it with require_parameters=true 404s.
         resp = chat(
             "risk_scoring", messages, system=SYSTEM_PROMPT,
             tools=OPENAI_TOOLS, tool_choice=named_tool_choice(tool_name),
@@ -85,8 +82,7 @@ def _forced_step(tool_name: str, messages: list[dict]):
         )
 
 
-# Runs the strict 3-step tool loop. Accepts extracted_signals from the Extraction Agent directly (no second DB read).
-# Inserts into risk_scores table and updates filing status to 'scored'.
+# Strict 3-step tool loop; takes extracted_signals in-memory from the Extraction Agent (no second DB read).
 @traced("risk_scoring")
 def run_risk_scoring(filing_id: int, ticker: str, extracted_signals: dict) -> dict:
     messages = [user_msg(_build_prompt(ticker, extracted_signals))]
@@ -99,26 +95,22 @@ def run_risk_scoring(filing_id: int, ticker: str, extracted_signals: dict) -> di
         resp, tool_call = _forced_step(tool_name, messages)
         logger.info(f"Step {step + 1}/3 — tool called: {tool_call.name}")
 
-        # Tool 1: execute DB query and return real data to the LLM. The filing being scored is
-        # excluded so the baseline is genuinely historical.
+        # The filing being scored is excluded so the baseline is genuinely historical.
         if tool_name == "fetch_historical_signals":
             with get_connection() as conn:
                 rows = get_historical_signals(conn, tool_call.args.get("ticker", ticker), exclude_filing_id=filing_id)
             tool_result_content = _format_historical(rows)
 
-        # Tool 2: collect component scores, compute weighted average
         elif tool_name == "score_risk_components":
             scores = handle_score_risk_components(tool_call.args)
             overall_score, risk_tier = compute_overall_score(scores)
             tool_result_content = f"Scores recorded. Overall score: {overall_score} ({risk_tier}). Now write the executive summary."
 
-        # Tool 3: collect executive summary
         else:
             executive_summary = handle_finalize_overall_risk(tool_call.args)
             tool_result_content = "Done."
 
-        # Append assistant turn and tool results, then continue to next step. Every call id must
-        # be answered, including duplicates.
+        # Every call id must be answered, including duplicates.
         pairs = [(tool_call.id, tool_result_content)]
         pairs += [(tc.id, "Ignored duplicate call.") for tc in resp.tool_calls if tc.id != tool_call.id]
         messages.append(assistant_msg_from_response(resp))
@@ -152,8 +144,6 @@ if __name__ == "__main__":
     parser.add_argument("filing_id", type=int)
     parser.add_argument("ticker", type=str)
     args = parser.parse_args()
-
-    # Load extracted signals from DB for standalone testing
 
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT * FROM signals WHERE filing_id = %s", (args.filing_id,))

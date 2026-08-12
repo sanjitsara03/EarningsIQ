@@ -1,5 +1,4 @@
-# Optional LangSmith tracing. No-op unless LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set.
-# One shared Client backs the OpenAI wrapper and every @traced span; flush_traces() drains its queue.
+# Optional LangSmith tracing — no-op unless LANGSMITH_TRACING=true and LANGSMITH_API_KEY are set.
 import logging
 import os
 
@@ -11,7 +10,6 @@ logger = logging.getLogger(__name__)
 _ls_client = None
 
 
-# True when the env opts into tracing. Checked once per process at first use.
 def tracing_enabled() -> bool:
     return os.getenv("LANGSMITH_TRACING", "").lower() == "true" and bool(os.getenv("LANGSMITH_API_KEY"))
 

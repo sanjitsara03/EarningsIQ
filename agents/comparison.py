@@ -1,7 +1,4 @@
-# The Comparison Agent answers questions that require looking across multiple filings —
-# trends, QoQ/YoY comparisons, "how has X changed over time."
-# It combines vector search (semantic) with structured signals (numeric) and exits only
-# when the terminal tool cite_and_answer is called.
+# Comparison Agent — answers multi-period trend questions with vector search + structured signals.
 
 import logging
 import re
@@ -52,7 +49,6 @@ COMPARISON_TRIGGERS = [
 ]
 
 
-# Returns True if the query contains comparison language.
 def is_comparison_query(query: str) -> bool:
     query_lower = query.lower()
     return any(re.search(p, query_lower) for p in COMPARISON_TRIGGERS)
@@ -79,10 +75,7 @@ def _format_tool_result(name: str, result) -> str:
     return str(result)
 
 
-# Open-ended tool loop that exits when the LLM calls cite_and_answer. Returns the answer,
-# citations, and a tool_trace of every tool result the model saw — consumers that only serve
-# the answer (the chat route) drop the trace; the benchmark keeps it so the judge can treat
-# DB-derived numbers as grounded.
+# Tool loop exiting on cite_and_answer; tool_trace lets the benchmark judge count DB-derived numbers as grounded.
 @traced("comparison")
 def run_comparison(query: str) -> dict:
     if not is_comparison_query(query):
@@ -97,8 +90,7 @@ def run_comparison(query: str) -> dict:
         resp = chat("comparison", messages, system=SYSTEM_PROMPT, tools=OPENAI_TOOLS)
         turns += 1
 
-        # No tool calls — the LLM finished without calling cite_and_answer. Nudge once toward the
-        # terminal tool; if it still answers in plain text, degrade to an uncited answer.
+        # No tool calls: nudge once toward cite_and_answer, then degrade to an uncited text answer.
         if not resp.tool_calls:
             if not nudged:
                 nudged = True
@@ -126,7 +118,6 @@ def run_comparison(query: str) -> dict:
                     final_result = handle_cite_and_answer(tc.args)
                     content = "Done."
                 else:
-                    # Unknown tool name — return an error tool result.
                     logger.warning(f"Unknown tool called: {tc.name}")
                     content = (
                         f"Error: unknown tool '{tc.name}'. Available tools: resolve_filing_ids, "

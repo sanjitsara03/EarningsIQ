@@ -1,5 +1,4 @@
-# Manages a psycopg2 connection pool backed by DATABASE_URL.
-# The pool is lazily initialized on first use; forked RQ work-horses build their own pool.
+# psycopg2 connection pool (DATABASE_URL), lazily initialized so forked RQ work-horses build their own.
 import os
 from contextlib import contextmanager
 

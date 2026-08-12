@@ -1,6 +1,4 @@
-# Tool schemas and handlers for the Extraction Agent.
-# TOOLS is the provider-neutral flat shape; agents convert it via llm.to_openai_tools().
-# TOOL_HANDLERS maps tool name → function that processes the LLM's input and returns stored data.
+# Extraction Agent tool schemas + handlers; TOOLS is the provider-neutral flat shape (see llm.to_openai_tools).
 import logging
 
 logger = logging.getLogger(__name__)
@@ -224,14 +222,12 @@ TOOLS = [
 ]
 
 
-# Each handler receives the raw input dict from the LLM tool call and returns it unchanged.
-# The extraction agent accumulates these into a results dict keyed by tool name.
+# Handlers receive the LLM's tool-call input; the agent accumulates their returns keyed by tool name.
 
 _UNIT_MULTIPLIERS = {"dollars": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
 
 
-# Converts a filing-stated figure to raw USD using the cited unit. Python owns this arithmetic —
-# the model reports (value, unit) as printed and never converts.
+# Python owns unit arithmetic — the model reports (value, unit) as printed and never converts.
 def to_usd(value, unit: str):
     if value is None:
         return None
@@ -240,10 +236,7 @@ def to_usd(value, unit: str):
     return float(value) * _UNIT_MULTIPLIERS[unit]
 
 
-# Normalizes revenue to raw USD (revenue_usd). unit_quote is kept for provenance; the raw
-# filing-scaled number and unit are dropped so downstream consumers see exactly one convention.
-# eps without a supporting eps_quote is dropped (None, not popped — the corrective-retry merge
-# in run_extraction filters on `is not None`, so a retry can legitimately restore it).
+# Normalizes revenue to raw USD; eps without eps_quote is None-ed, not popped, so the retry merge can restore it.
 def handle_extract_financial_metrics(input: dict) -> dict:
     out = dict(input)
     out["revenue_usd"] = to_usd(input["revenue"], input["unit"])
@@ -272,8 +265,7 @@ def handle_extract_segment_performance(input: dict) -> list:
     return segments
 
 
-# Normalizes guidance to raw USD. Guidance is a non-critical field: a figure with no stated unit
-# is dropped with a warning rather than failing the extraction.
+# Guidance is non-critical: a figure with no stated unit is dropped with a warning, not a failure.
 def handle_extract_management_outlook(input: dict) -> dict:
     out = dict(input)
     guidance = input.get("guidance_revenue")

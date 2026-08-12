@@ -1,5 +1,4 @@
-# GET /job/{job_id} — polls the status of an RQ background job.
-# Returns status ('queued', 'started', 'finished', 'failed') and the job result when finished.
+# GET /job/{job_id} — polls an RQ job; returns status and the job result when finished.
 
 from fastapi import APIRouter, HTTPException, Request
 

@@ -1,7 +1,5 @@
-# The single boundary between agents and the LLM provider. All six agents call OpenRouter's
-# OpenAI-compatible /chat/completions through chat()/chat_json() and never touch the SDK directly.
-# Owns: the lazy client, request build (per-agent config + provider routing), response
-# normalization, tool-schema conversion, message-construction helpers, and the error taxonomy.
+# The single boundary between agents and the LLM provider — agents call OpenRouter via chat()/chat_json()
+# and never touch the SDK directly.
 import json
 import logging
 import os
@@ -53,8 +51,7 @@ class ToolCall:
     args: dict
 
 
-# Normalized response. raw_message is the ChatCompletionMessage, kept for the assistant echo;
-# provider is OpenRouter's served-by metadata.
+# Normalized response; raw_message keeps the ChatCompletionMessage for the assistant echo.
 @dataclass(frozen=True)
 class LLMResponse:
     text: str | None
@@ -92,8 +89,7 @@ def user_msg(content: str) -> dict:
     return {"role": "user", "content": content}
 
 
-# Builds the assistant-turn echo for multi-turn tool loops. Strips provider-specific fields and
-# guarantees the message carries content or tool_calls.
+# Assistant-turn echo for tool loops; provider fields stripped, must carry content or tool_calls.
 def assistant_msg_from_response(resp: LLMResponse) -> dict:
     msg = resp.raw_message.model_dump(include={"role", "content", "tool_calls"}, exclude_none=True)
     if "tool_calls" not in msg and not msg.get("content"):
@@ -101,8 +97,7 @@ def assistant_msg_from_response(resp: LLMResponse) -> dict:
     return msg
 
 
-# One {"role": "tool"} message per call id. Every tool_call id in the preceding assistant message
-# must be answered.
+# One {"role": "tool"} message per call id — every id in the preceding assistant message must be answered.
 def tool_result_msgs(results: list[tuple[str, str]]) -> list[dict]:
     return [{"role": "tool", "tool_call_id": call_id, "content": content} for call_id, content in results]
 
@@ -154,9 +149,7 @@ def _normalize(agent: str, completion) -> LLMResponse:
     )
 
 
-# Core call. messages must NOT contain a system entry — pass system= instead.
-# Retries the identical request once on malformed tool-argument JSON; raises NoToolCallError when
-# a forced tool_choice comes back with zero tool calls.
+# Core call; messages must NOT contain a system entry — pass system= instead. One retry on malformed tool args.
 def chat(
     agent: str,
     messages: list[dict],
@@ -202,7 +195,6 @@ def chat(
         try:
             completion = client.chat.completions.create(**kwargs)
         except openai.OpenAIError as e:
-            # Wrap SDK exceptions into the typed LLMError taxonomy.
             raise LLMError(f"[{agent}] provider call failed: {type(e).__name__}: {e}") from e
         latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -235,8 +227,7 @@ def chat(
     raise ToolArgumentError(agent, last_malformed.name, last_malformed.raw)
 
 
-# Structured-output call: strict json_schema response format, parsed to a dict.
-# One retry on unparseable output; truncation raises immediately.
+# Structured-output call (strict json_schema → dict); one retry on unparseable output, truncation raises.
 def chat_json(
     agent: str,
     messages: list[dict],

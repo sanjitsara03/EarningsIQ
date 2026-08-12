@@ -1,6 +1,4 @@
-# RQ job functions executed by workers.
-# Each function is a self-contained pipeline step that can be enqueued independently.
-# run_full_pipeline chains ingest → extraction → risk scoring for a ticker that isn't in the DB yet.
+# RQ job functions — run_full_pipeline chains ingest → extraction → risk scoring for a ticker.
 
 import logging
 from datetime import date
@@ -21,20 +19,14 @@ from scraper.edgar_client import get_10k_filings, get_10q_filings, get_cik
 
 logger = logging.getLogger(__name__)
 
-# RQ workers import this module directly — configure logging here so pipeline/agent warnings
-# (e.g. dropped unverifiable quotes) reach the worker logs. No-op when already configured.
+# RQ workers import this module directly — configure logging here so agent warnings reach worker logs.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-# Filings younger than this cannot have a successor on EDGAR (quarterly cadence); below this age
-# the freshness check skips the network round trip.
+# Filings younger than this can't have a successor on EDGAR, so the freshness check skips the network.
 FRESHNESS_WINDOW_DAYS = 85
 
 
-# Ingests a ticker, then runs extraction and risk scoring on each filing that still needs it.
-# Status gating: 'scored' filings are skipped; 'embedded'/'extracted' filings run the remaining
-# stages (inserts are upserts). If ingestion produced nothing new and no filing needs work, the
-# job raises before any LLM call. flush_traces() runs after the @traced root span on the inner
-# function has closed; RQ work-horses exit immediately after the job.
+# flush_traces() must run after the @traced root span closes — RQ work-horses exit right after the job.
 def run_full_pipeline(ticker: str, filing_type: str = "10-Q", limit: int = 1) -> dict:
     try:
         return _run_full_pipeline(ticker, filing_type, limit)
@@ -76,12 +68,7 @@ def _run_full_pipeline(ticker: str, filing_type: str, limit: int) -> dict:
     return {"ticker": ticker, "filings_processed": results}
 
 
-# Checks whether a ticker has fully scored data in the DB that is still current.
-# "Current" means: either the latest local filing is young enough that no successor can exist yet,
-# or EDGAR confirms we already hold the newest filing. A newer filing on EDGAR returns False,
-# which sends the chat route down the existing slow path (enqueue pipeline → poll → retry).
-# min_filings > 1 (multi-quarter comparisons) additionally requires that many filings with signals,
-# so a 4-quarter question backfills history instead of running against a single quarter.
+# Ready = scored signals present and no newer filing on EDGAR; min_filings>1 lets comparisons backfill history.
 def ticker_is_ready(ticker: str, filing_type: str = "10-Q", min_filings: int = 1) -> bool:
     with get_connection() as conn:
         latest = get_latest_filing(conn, ticker, filing_type)
@@ -108,7 +95,7 @@ def ticker_is_ready(ticker: str, filing_type: str = "10-Q", min_filings: int = 1
         filings = get_10q_filings(cik, limit=1) if filing_type == "10-Q" else get_10k_filings(cik, limit=1)
     except Exception:
         logger.warning(f"EDGAR freshness check failed for {ticker} — serving existing data")
-        return True  # EDGAR unreachable — serve existing data
+        return True
 
     if not filings:
         return True

@@ -1,5 +1,4 @@
-# Promptfoo provider for the Risk Scoring agent.
-# Fetches existing risk score from DB if present, otherwise runs the agent.
+# Promptfoo provider for the Risk Scoring agent; serves the DB-cached score, else runs the agent.
 
 import json
 import os
@@ -26,7 +25,6 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
 
             filing_id = filing_ids[0]
 
-            # Return existing score if already computed
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT overall_score, risk_tier, executive_summary FROM risk_scores WHERE filing_id = %s",
@@ -38,7 +36,6 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
                 result = {"overall_score": float(row[0]), "risk_tier": row[1], "executive_summary": row[2]}
                 return {"output": json.dumps(result)}
 
-            # Otherwise fetch signals and run agent
             with conn.cursor() as cur:
                 cur.execute(
                     """

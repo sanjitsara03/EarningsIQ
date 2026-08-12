@@ -1,5 +1,4 @@
-# POST /ingest — enqueues a full pipeline job for a ticker.
-# Job status polling lives in api/routes/jobs.py (GET /job/{job_id}).
+# POST /ingest — enqueues a full pipeline job; status polling lives in GET /job/{job_id} (jobs.py).
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -20,7 +19,6 @@ class JobResponse(BaseModel):
     status: str
 
 
-# Enqueues a full pipeline job (ingest → extraction → risk scoring) for the given ticker.
 @router.post("/ingest", response_model=JobResponse)
 def enqueue_ingest(body: IngestRequest, request: Request):
     # Each pipeline job is the most expensive thing this API can do — rate-limit before enqueueing.

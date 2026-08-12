@@ -1,5 +1,4 @@
-# Promptfoo provider for the Extraction agent.
-# Fetches existing signals from DB if present, otherwise runs the agent.
+# Promptfoo provider for the Extraction agent — reads existing signals from the DB (never runs the agent).
 
 import json
 import os

@@ -1,5 +1,4 @@
-# Shared embedding model for the whole app. Ingestion (documents) and the Comparison Agent
-# (queries) must use the same model.
+# Shared embedding model — ingestion and query-time retrieval must use the same model.
 import os
 
 from dotenv import load_dotenv
@@ -24,11 +23,9 @@ def _get_model() -> VoyageAIEmbeddings:
     return _embed_model
 
 
-# Embeds document chunks for storage in pgvector.
 def embed_documents(texts: list[str]) -> list[list[float]]:
     return _get_model().embed_documents(texts)
 
 
-# Embeds a search query.
 def embed_query(text: str) -> list[float]:
     return _get_model().embed_query(text)

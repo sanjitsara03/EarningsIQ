@@ -1,8 +1,6 @@
-# Analyst benchmark: runs the real agent pipeline over a diverse query set, gathers fresh
-# professional research per query via Tavily, and scores the agent's output against it with
-# deterministic cross-checks plus a cross-family LLM judge (gpt-5.2 grades sonnet-written
-# outputs). Read-only over the system — routing helpers are imported from the chat route so
-# benchmark routing cannot drift from prod.
+# Analyst benchmark: runs the real agent pipeline over the query set, gathers fresh professional
+# research via Tavily, and scores agent output with deterministic checks plus a cross-family LLM judge.
+# Routing helpers are imported from the chat route so benchmark routing cannot drift from prod.
 #
 # Usage:
 #   uv run python -m evals.analyst_benchmark                       # full run (~$1, 5-8 min)
@@ -15,11 +13,7 @@
 #   uv run python -m evals.analyst_benchmark --compare REPORT      # per-dimension deltas vs a report
 #
 # Preconditions: tickers in the query set must be ingested (checked; remediation printed).
-# Known limitations: (1) per-query token usage is not recorded (run_* functions do not surface
-# usage); wall-clock latency per stage is recorded instead. (2) Web-route grounding scores are
-# conservative lower bounds — the judge sees the benchmark's research sources but NOT the Tavily
-# results the web agent itself retrieved, so facts grounded in the agent's own searches can be
-# scored as ungrounded.
+# Known limitation: per-query token usage is not recorded; wall-clock latency per stage is.
 import argparse
 import json
 import logging
@@ -49,11 +43,7 @@ DIMENSIONS = ["factual_accuracy", "coverage", "grounding", "directional_agreemen
 WORST_QUERY_WEIGHTS = {"factual_accuracy": 2, "coverage": 1, "grounding": 2, "directional_agreement": 1}
 
 
-# ---------------------------------------------------------------------------- RUN stage
-
-# Executes the real agent pipeline for one query, replicating api/routes/chat.py's _chat()
-# routing minus HTTP/queue. Imports are deliberate reuse of the route's internals so this
-# cannot drift from prod routing.
+# Replicates chat.py's _chat() routing minus HTTP/queue, reusing the route's internals so it can't drift.
 def run_agent_for_query(bq: BenchmarkQuery, ingest_missing: bool) -> dict:
     from agents.advice import run_advice, run_analysis
     from agents.comparison import is_comparison_query, run_comparison
@@ -104,8 +94,7 @@ def run_agent_for_query(bq: BenchmarkQuery, ingest_missing: bool) -> dict:
             record["filing_period"] = latest["period"] if latest else None
             record["filed_at"] = latest["filed_at"].isoformat() if latest and latest["filed_at"] else None
             web = run_web_search(bq.query) if intent.get("web_search_needed") else None
-            # The judge needs the agent's inputs to trace grounding — filing-derived claims are
-            # legitimate even when absent from web sources.
+            # Filing-derived claims are grounded even when absent from web sources — the judge needs the inputs.
             record["agent_inputs"] = {"signals": signals, "risk": risk, "web_summary": web}
             period = str(record["filing_period"]) if record["filing_period"] else None
             if intent_type == "single_analysis":
@@ -123,10 +112,7 @@ def run_agent_for_query(bq: BenchmarkQuery, ingest_missing: bool) -> dict:
     return record
 
 
-# ---------------------------------------------------------------------------- RESEARCH stage
-
-# Structured Tavily search (the web agent's helper returns a formatted string; the benchmark
-# needs url/title/content/score). One retry, then empty.
+# Structured Tavily search (the web agent's helper only returns a formatted string); one retry, then empty.
 def _tavily_raw(query: str, max_results: int = 3) -> list[dict]:
     from tavily import TavilyClient
 
@@ -163,15 +149,12 @@ def research_query(bq: BenchmarkQuery) -> dict:
             "latency_ms": int((time.monotonic() - start) * 1000)}
 
 
-# ---------------------------------------------------------------------------- JUDGE stage
-
 def judge_query(bq: BenchmarkQuery, run_record: dict, sources: list[dict]) -> tuple[dict, dict]:
     start = time.monotonic()
     agent_text = json.dumps(run_record.get("agent_output"), default=str)
     ref_text = "\n\n".join((s.get("content") or "")[:2000] for s in sources)
 
-    # extract_numeric_claims never raises (degrades to empty claims) — one flaky extractor call
-    # must not abort the whole benchmark run.
+    # extract_numeric_claims never raises — one flaky extractor call must not abort the whole run.
     agent_claims = extract_numeric_claims(agent_text, is_reference=False)
     ref_claims = extract_numeric_claims(ref_text, is_reference=True)
     checks = deterministic_checks(bq, run_record, agent_claims, ref_claims)
@@ -185,8 +168,6 @@ def judge_query(bq: BenchmarkQuery, run_record: dict, sources: list[dict]) -> tu
     judge["latency_ms"] = int((time.monotonic() - start) * 1000)
     return checks, judge
 
-
-# ---------------------------------------------------------------------------- report
 
 def _git_sha() -> str:
     try:
@@ -289,9 +270,7 @@ def write_markdown(report: dict, path: Path) -> None:
     path.write_text("\n".join(lines))
 
 
-# base_report (rejudge mode) preserves the ORIGINAL run's provenance — agent_models, git_sha,
-# and research_snapshot describe the stored agent outputs, not the current environment; only the
-# judge identity is stamped fresh. Without this, --compare would flag every rejudged row as n/c.
+# Rejudge keeps the original run's provenance — only the judge is stamped fresh, else --compare flags all rows n/c.
 def build_report(query_records: list[dict], research_mode: str, research_snapshot: str | None,
                  base_report: dict | None = None) -> dict:
     from llm import AGENT_MODELS
@@ -318,8 +297,6 @@ def build_report(query_records: list[dict], research_mode: str, research_snapsho
         "aggregate": build_aggregate(query_records),
     }
 
-
-# ---------------------------------------------------------------------------- compare / rejudge
 
 def compare_reports(current: dict, previous: dict) -> None:
     prev_by_id = {q["id"]: q for q in previous["queries"]}
@@ -362,8 +339,6 @@ def rejudge_report(previous: dict) -> list[dict]:
     return records
 
 
-# ---------------------------------------------------------------------------- main
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyst benchmark")
     parser.add_argument("--query", action="append", help="filter by query id (repeatable)")
@@ -405,8 +380,7 @@ def main() -> int:
                 research_map = {q.id: research_query(q) for q in selected}
                 snapshot_name = f"benchmark_research_{ts}.json"
                 (OUTPUT_DIR / snapshot_name).write_text(json.dumps(research_map, indent=1))
-                # Merge into (never clobber) the latest snapshot: a filtered fresh run must not
-                # shrink the map that later --skip-research full runs rely on.
+                # Merge into (never clobber) latest — a filtered run must not shrink the map --skip-research uses.
                 latest_path = OUTPUT_DIR / "benchmark_research_latest.json"
                 merged = json.loads(latest_path.read_text()) if latest_path.exists() else {}
                 merged.update(research_map)
@@ -418,8 +392,7 @@ def main() -> int:
                 logger.info(f"--- RUN {bq.id} ---")
                 run_record = run_agent_for_query(bq, args.ingest_missing)
                 research = research_map.get(bq.id) or {"status": "empty", "sources": []}
-                # intent_match needs no references — compute it for every completed run so an
-                # empty research set doesn't count a correct routing as a failure.
+                # intent_match needs no references — an empty research set must not fail correct routing.
                 base_checks = {}
                 if run_record["status"] == "ok":
                     intent_actual = (run_record.get("intent_actual") or {}).get("intent")
@@ -466,8 +439,7 @@ def main() -> int:
         print(f"  intent {det['intent_match']} · numeric {det['numeric_match']} · consensus {det['consensus']}")
         print(f"  report: {summary_path}")
 
-        # In rejudge mode agent_error records are historical carry-overs (a rejudge can never
-        # re-run agents), so only fresh judge failures count.
+        # A rejudge can never re-run agents, so agent_error records are historical — only judge failures count.
         failed = [q for q in records
                   if (q["run"]["status"] == "agent_error" and not args.rejudge)
                   or q["judge"].get("status") == "judge_failed"]

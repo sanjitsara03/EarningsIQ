@@ -1,5 +1,4 @@
-# Promptfoo Python provider for the orchestrator agent.
-# Receives the user query and returns the raw JSON string output from run_orchestrator.
+# Promptfoo provider for the Orchestrator agent.
 
 import json
 import os

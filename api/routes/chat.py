@@ -1,6 +1,4 @@
-# POST /chat — the main query endpoint.
-# Fast path: if ticker data is already in DB, runs advice and returns the answer immediately.
-# Slow path: if data is missing, enqueues the full pipeline and returns a job_id to poll.
+# POST /chat — fast path answers from data already in the DB; slow path enqueues the pipeline and returns a job_id.
 
 import logging
 from datetime import date
@@ -54,9 +52,7 @@ def _load_context(ticker: str, filing_type: str) -> tuple[dict, dict, dict | Non
     return (signals_list[0] if signals_list else {}), risk_result, latest
 
 
-# "Last quarter" questions route to the 10-Q, but a fiscal Q4 has no 10-Q — those numbers only
-# appear in the 10-K. When the latest 10-K is more recent than the latest 10-Q, analyze the 10-K
-# instead. If the company doesn't file one of the two forms, fall back to whichever it does file.
+# Fiscal Q4 has no 10-Q — route to the 10-K when it's newer; fall back to whichever form the company files.
 def _resolve_filing_type(ticker: str, filing_type: str) -> str:
     if filing_type != "10-Q":
         return filing_type
@@ -91,8 +87,7 @@ def _resolve_filing_type(ticker: str, filing_type: str) -> str:
 def chat(body: ChatRequest, request: Request):
     # Every /chat request can trigger LLM spend — rate-limit before any model call.
     check_rate_limit(request, "chat")
-    # Maps typed LLM failures and loop timeouts to error responses. Pipeline failures surface
-    # via /job/{id}.
+    # Typed LLM failures and loop timeouts map to error responses; pipeline failures surface via /job/{id}.
     try:
         return _chat(body, request)
     except (LLMError, TimeoutError) as e:
@@ -101,8 +96,7 @@ def chat(body: ChatRequest, request: Request):
 
 
 def _chat(body: ChatRequest, request: Request):
-    # Skip orchestrator if ticker and filing_type are already known (e.g. retry after pipeline job).
-    # The retry carries the first pass's orchestrator intent; the regex is only a fallback.
+    # Ticker + filing_type known (retry after a pipeline job) — skip the orchestrator; regex is only a fallback.
     if body.ticker and body.filing_type:
         ticker = body.ticker.upper()
         filing_type = body.filing_type
@@ -115,7 +109,6 @@ def _chat(body: ChatRequest, request: Request):
         filing_type = intent["filing_types"][0] if intent.get("filing_types") else "10-Q"
         intent_type = intent.get("intent")
 
-    # Web-only
     if intent_type == "web_only":
         summary, sources = run_web_search_detailed(body.query)
         return {
@@ -128,14 +121,11 @@ def _chat(body: ChatRequest, request: Request):
     if ticker and ticker in UNSUPPORTED_TICKERS:
         return {"type": "error", "message": f"{ticker} is a financial institution whose SEC filings use a non-standard structure not supported in v1. Try a company like AAPL, MSFT, NVDA, or TSLA."}
 
-    # Comparison query — uses vector search + structured signals
     if intent_type == "comparison" and is_comparison_query(body.query):
         if not ticker:
             return {"type": "error", "message": "Please mention a specific publicly traded company (e.g. Apple, MSFT, Tesla)."}
 
-        # A 4-quarter comparison needs 4 scored quarters — backfill history when only some exist.
-        # No infinite retry risk: the post-pipeline retry carries a hint intent with periods_needed=1,
-        # so a company with fewer filings than requested still gets an answer from what exists.
+        # Backfill missing quarters; the post-pipeline retry hint pins periods_needed=1, so no infinite retry.
         periods_needed = intent.get("periods_needed") or 1
         if not ticker_is_ready(ticker, filing_type, min_filings=periods_needed):
             try:
@@ -162,7 +152,6 @@ def _chat(body: ChatRequest, request: Request):
         # tool_trace is for the benchmark judge, not the API — serve only answer + citations.
         return {"type": "comparison", "answer": result["answer"], "citations": result.get("citations", [])}
 
-    # Guard: no ticker detected — ask user to specify a company.
     if not ticker:
         return {"type": "error", "message": "Please mention a specific publicly traded company (e.g. Apple, MSFT, Tesla)."}
 
@@ -170,7 +159,6 @@ def _chat(body: ChatRequest, request: Request):
     if not body.filing_type:
         filing_type = _resolve_filing_type(ticker, filing_type)
 
-    # Check if ticker data is ready in DB
     if not ticker_is_ready(ticker, filing_type):
         # Pre-check EDGAR before enqueuing a long pipeline job — avoids 2-minute wait for ETFs/invalid tickers.
         try:
@@ -180,7 +168,6 @@ def _chat(body: ChatRequest, request: Request):
             return {"type": "error", "message": f"'{ticker}' was not found in SEC EDGAR. Please check the ticker and try again."}
 
         if not filings:
-            # ETF, index fund, or non-filing entity — fall back to web search.
             summary = run_web_search(body.query)
             return {"type": "web", "answer": f"Note: {ticker} does not file {filing_type} reports (it may be an ETF or index fund). Here's what I found via web search:\n\n{summary}"}
 
@@ -194,8 +181,7 @@ def _chat(body: ChatRequest, request: Request):
         )
         return {"type": "queued", "job_id": job.id, "status": "queued", "message": f"Ingesting {ticker} — poll /job/{job.id} for status.", "ticker": ticker, "filing_type": filing_type, "intent": intent_type}
 
-    # Fast path — data exists. Factual single_analysis questions get a direct answer with no
-    # investment stance; advice questions get the buy/hold/sell card.
+    # Fast path: single_analysis gets a factual answer with no stance, advice gets the buy/hold/sell card.
     extracted_signals, risk_result, latest_filing = _load_context(ticker, filing_type)
     web_summary = run_web_search(body.query) if intent.get("web_search_needed") else None
     period = latest_filing["period"] if latest_filing else None

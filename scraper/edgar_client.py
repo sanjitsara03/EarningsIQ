@@ -1,5 +1,4 @@
 # Fetches SEC EDGAR filings for a given ticker.
-# Four functions: get_cik, get_10q_filings, get_10k_filings, fetch_filing.
 import json
 import os
 

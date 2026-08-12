@@ -1,10 +1,4 @@
-# The orchestrator is the first thing that runs when a user asks a question.
-# Its only job is to read the question and figure out
-# what kind of work needs to happen: which company, which filing type, how many periods,
-# and whether we need a web search on top of the filing data.
-#
-# It makes a single LLM call using the cheapest/fastest model and returns a small
-# JSON blob that the rest of the system uses to decide what to do next.
+# Orchestrator — one cheap LLM call that turns the user query into the intent JSON routing all downstream work.
 
 import json
 import logging
@@ -56,8 +50,7 @@ web_search_needed:
 Return only the JSON object. No other text."""
 
 
-# Validation model for the intent JSON; extra="forbid" emits additionalProperties: false in the
-# schema. An empty ticker string means no specific company was mentioned.
+# extra="forbid" emits additionalProperties: false; ticker == "" means no specific company mentioned.
 class IntentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,8 +64,7 @@ class IntentOutput(BaseModel):
 ORCHESTRATOR_SCHEMA = IntentOutput.model_json_schema()
 
 
-# Single LLM call — classifies the user query into a validated intent dict.
-# One corrective retry on validation failure, then LLMOutputError.
+# Classifies the query into a validated intent dict; one corrective retry, then LLMOutputError.
 @traced("orchestrator")
 def run_orchestrator(query: str) -> dict:
     messages = [user_msg(query)]

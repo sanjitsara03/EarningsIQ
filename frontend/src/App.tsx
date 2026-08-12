@@ -16,8 +16,6 @@ import {
   type Citation,
 } from './api'
 
-// --- Types ---
-
 type Status = 'idle' | 'analyzing' | 'polling' | 'results'
 type Recommendation = 'BUY' | 'HOLD' | 'SELL'
 type RiskTier = 'LOW' | 'MEDIUM' | 'HIGH'
@@ -63,8 +61,6 @@ interface TextResult {
 }
 
 type ResultData = AdviceResult | TextResult
-
-// --- Formatters ---
 
 function fmtRevenue(v: number | null): string {
   if (!v) return 'N/A'
@@ -168,8 +164,6 @@ function buildTextResult(res: ChatResponse): TextResult {
   return { kind: 'text', answer }
 }
 
-// --- Constants ---
-
 const EXAMPLES = [
   'How did Apple do last quarter?',
   "What are NVIDIA's biggest risks?",
@@ -185,8 +179,6 @@ const ANALYZING_STEPS = [
   'Generating advice',
 ]
 
-// --- Color mappings ---
-
 const REC_COLOR: Record<Recommendation, string> = {
   BUY: 'text-emerald-400',
   HOLD: 'text-amber-400',
@@ -198,8 +190,6 @@ const RISK_STYLE: Record<RiskTier, { text: string; fill: string }> = {
   MEDIUM: { text: 'text-amber-400', fill: 'bg-amber-500' },
   HIGH: { text: 'text-red-400', fill: 'bg-red-500' },
 }
-
-// --- Shared components ---
 
 function GitHubLink() {
   return (
@@ -302,8 +292,6 @@ function QueryInput({ query, setQuery, onSubmit, autoFocus, compact, disabled }:
   )
 }
 
-// --- Idle view ---
-
 function IdleView({
   query,
   setQuery,
@@ -352,8 +340,6 @@ function IdleView({
     </div>
   )
 }
-
-// --- Analyzing view ---
 
 function AnalyzingView({ query }: { query: string }) {
   const [step, setStep] = useState(0)
@@ -421,8 +407,6 @@ function AnalyzingView({ query }: { query: string }) {
   )
 }
 
-// --- Polling view (slow path — first-time ingestion) ---
-
 function PollingView({ ticker }: { ticker: string }) {
   const [elapsed, setElapsed] = useState(0)
 
@@ -449,7 +433,6 @@ function PollingView({ ticker }: { ticker: string }) {
         </p>
       </div>
 
-      {/* Indeterminate progress bar */}
       <div className="w-48 h-px bg-surface rounded-full overflow-hidden">
         <div className="h-full bg-emerald-500 rounded-full animate-[indeterminate_1.8s_ease-in-out_infinite]" />
       </div>
@@ -458,8 +441,6 @@ function PollingView({ ticker }: { ticker: string }) {
     </div>
   )
 }
-
-// --- Text result view (analysis / comparison / web) ---
 
 function TextResultView({
   query,
@@ -585,8 +566,6 @@ function TextResultView({
   )
 }
 
-// --- Advice result view ---
-
 function AdviceResultView({
   query,
   result,
@@ -605,7 +584,6 @@ function AdviceResultView({
 
   return (
     <div className="min-h-screen px-6 py-8 max-w-4xl mx-auto animate-slide-up">
-      {/* Header */}
       <div className="flex items-center justify-between mb-10">
         <BrandMark />
         <div className="flex items-center gap-3">
@@ -619,7 +597,6 @@ function AdviceResultView({
         </div>
       </div>
 
-      {/* Company identifier */}
       <div className="mb-8">
         <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568]">
           {result.ticker}
@@ -630,7 +607,7 @@ function AdviceResultView({
         <p className="font-body text-[#3d4a5c] text-xs mt-1.5 italic">&ldquo;{query}&rdquo;</p>
       </div>
 
-      {/* Data-loading warnings — shown when signals/risk fetches failed (not for genuine 404s) */}
+      {/* Shown when signals/risk fetches failed — never for genuine 404s */}
       {result.dataWarnings.length > 0 && (
         <div className="mb-8 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 space-y-1">
           {result.dataWarnings.map((w) => (
@@ -641,7 +618,6 @@ function AdviceResultView({
         </div>
       )}
 
-      {/* Recommendation + Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-8 sm:gap-14 items-start mb-10">
         <div>
           <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-2">
@@ -681,7 +657,6 @@ function AdviceResultView({
 
       <div className="border-t border-border mb-8" />
 
-      {/* Risk score */}
       {result.riskScore > 0 && (
         <div className="mb-8">
           <div className="flex items-center justify-between mb-3">
@@ -711,7 +686,6 @@ function AdviceResultView({
         </div>
       )}
 
-      {/* Key positives + risks */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
         <div>
           <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-4">
@@ -743,7 +717,6 @@ function AdviceResultView({
 
       <div className="border-t border-border mb-8" />
 
-      {/* Reasoning */}
       <div className="mb-10">
         <p className="font-mono text-xs tracking-widest uppercase text-[#4a5568] mb-3">
           Analyst Reasoning
@@ -753,20 +726,16 @@ function AdviceResultView({
         </p>
       </div>
 
-      {/* Follow-up input */}
       <div className="mb-10">
         <QueryInput query={newQuery} setQuery={setNewQuery} onSubmit={onResubmit} compact />
       </div>
 
-      {/* Disclaimer */}
       <div className="border-t border-border pt-6">
         <p className="font-body text-xs text-[#3d4a5c]">{result.disclaimer}</p>
       </div>
     </div>
   )
 }
-
-// --- Root app ---
 
 export default function App() {
   const [query, setQuery] = useState('')
@@ -775,9 +744,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [pollingTicker, setPollingTicker] = useState('')
 
-  // Fetches signals + risk and builds the full display result from an advice response.
-  // A failed fetch (anything but a 404) still renders the advice card, with a visible warning
-  // in place of silently showing N/A.
+  // A failed signals/risk fetch (anything but a 404) still renders the advice card, with a visible warning.
   const hydrateAdvice = async (advice: AdviceResponse) => {
     const warnings: string[] = []
     const [signals, risk] = await Promise.all([
@@ -804,16 +771,13 @@ export default function App() {
     try {
       const chatRes = await chat(q)
 
-      // Backend error (no ticker detected, ticker not in EDGAR, etc.)
       if (chatRes.type === 'error') {
         setErrorMsg(chatRes.message)
         setStatus('idle')
         return
       }
 
-      // Slow path — data not yet in DB, pipeline enqueued
       if (chatRes.type === 'queued') {
-        // Extract ticker from the message for the polling view
         const ticker = chatRes.message.match(/Ingesting (\w+)/)?.[1] ?? ''
         setPollingTicker(ticker)
         setStatus('polling')
@@ -830,13 +794,11 @@ export default function App() {
         return
       }
 
-      // Fast path — advice ready
       if (chatRes.type === 'advice') {
         await hydrateAdvice(chatRes)
         return
       }
 
-      // Analysis, comparison, or web search — markdown answer
       setResultData(buildTextResult(chatRes))
       setStatus('results')
     } catch (err) {

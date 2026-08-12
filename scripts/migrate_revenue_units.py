@@ -1,7 +1,5 @@
-# One-off migration: rename signals.revenue -> revenue_usd and guidance_revenue ->
-# guidance_revenue_usd, converting stored values from the old implicit-millions convention to raw
-# USD, and rewriting segments JSONB entries from {revenue} (millions) to {revenue_usd} (raw USD).
-# All conversions run ONLY when this run performed the rename, so re-running is a no-op.
+# One-off migration: rename signals revenue columns to *_usd, converting implicit-millions values
+# (including segments JSONB) to raw USD. Conversions run only when this run did the rename — re-runs are no-ops.
 #
 # Usage: uv run python scripts/migrate_revenue_units.py
 import json
@@ -53,8 +51,7 @@ def main() -> None:
                 else:
                     logger.info(f"signals.{old} already renamed — skipping its conversions")
 
-            # Value conversions are tied to the rename happening in THIS run: after a completed
-            # run the columns are already renamed, so a re-run converts nothing.
+            # Conversions are tied to the rename happening in THIS run, so a re-run converts nothing.
             for new in renamed_now:
                 cur.execute(f"UPDATE signals SET {new} = {new} * %s WHERE {new} IS NOT NULL", (MILLIONS,))
                 logger.info(f"Converted {cur.rowcount} {new} values from millions to raw USD")

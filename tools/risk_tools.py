@@ -1,9 +1,6 @@
-# Tool schemas and handlers for the Risk Scoring Agent.
-# Three tools are called in strict order (STEP_ORDER). The full tool list is declared on every
-# request; each step's tool is forced via a named tool_choice.
+# Risk Scoring Agent tools; the full list is declared each request, each step's tool forced by named tool_choice.
 
 TOOLS = [
-    # fetch historical baseline from DB
     {
         "name": "fetch_historical_signals",
         "description": (
@@ -21,7 +18,6 @@ TOOLS = [
             "required": ["ticker"],
         },
     },
-    # score the 5 risk components against the historical baseline
     {
         "name": "score_risk_components",
         "description": (
@@ -71,7 +67,7 @@ TOOLS = [
             ],
         },
     },
-    # provide executive summary — Python recomputes the weighted average, does not trust LLM's score
+    # Python recomputes the weighted average — the LLM's own overall score is never trusted.
     {
         "name": "finalize_overall_risk",
         "description": (
@@ -115,11 +111,9 @@ def compute_overall_score(scores: dict) -> tuple[float, str]:
     return round(overall, 2), tier
 
 
-# Returns component scores unchanged
 def handle_score_risk_components(input: dict) -> dict:
     return input
 
 
-# Returns the executive summary string.
 def handle_finalize_overall_risk(input: dict) -> str:
     return input["executive_summary"]

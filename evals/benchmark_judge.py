@@ -1,5 +1,4 @@
-# Judging layer for the analyst benchmark: a cross-family LLM judge (gpt-5.2 grades the
-# sonnet-written outputs), a cheap numeric-claims extractor, and deterministic cross-checks.
+# Benchmark judging layer: a cross-family LLM judge, a cheap numeric-claims extractor, and deterministic checks.
 import json
 import logging
 import sys
@@ -27,8 +26,7 @@ class DimensionScore(BaseModel):
     score: int
     evidence: list[str]
 
-    # Range enforced via validator, not Field(ge/le) — those emit minimum/maximum keywords
-    # that strict json_schema mode rejects.
+    # Range enforced via validator — Field(ge/le) emits minimum/maximum, which strict json_schema rejects.
     @field_validator("score")
     @classmethod
     def _score_in_range(cls, v: int) -> int:
@@ -159,9 +157,7 @@ def empty_claims() -> dict:
     return {f: None for f in NumericClaims.model_fields}
 
 
-# Extracts numeric claims from agent output or concatenated reference content. Never raises —
-# a failed extraction degrades to empty claims (the judge still runs; deterministic numeric
-# checks come back not_comparable).
+# Never raises — a failed extraction degrades to empty claims so the judge still runs.
 def extract_numeric_claims(text: str, *, is_reference: bool) -> dict:
     role = "professional research sources" if is_reference else "an AI analyst's answer"
     try:
@@ -187,9 +183,7 @@ def _compare(agent_val, ref_val, *, rel_tol=None, abs_tol=None) -> str:
     return "mismatch"
 
 
-# YoY growth appears as either percent (16.0) or a fraction (0.16) depending on the source —
-# extracted signals store fractions, analyst sources state percent. A 100x-off pair that matches
-# after rescaling is a representation difference, not a numeric error.
+# YoY may be stated as percent (16.0) or fraction (0.16) — a rescaled match is representation, not error.
 def _compare_yoy(agent_val, ref_val) -> str:
     result = _compare(agent_val, ref_val, abs_tol=YOY_PP_TOL)
     if result != "mismatch":
@@ -200,11 +194,7 @@ def _compare_yoy(agent_val, ref_val) -> str:
     return "mismatch"
 
 
-# Same-period test on structured (year, month, scope) fields — free-text labels from two
-# independent extractions almost never string-match, which would misclassify real mismatches.
-# Periods differ only when both sides state a field AND they disagree. Scope matters because a
-# fiscal year and its final quarter share an end month: 10-K annual totals vs a source's Q4
-# figures is a period difference, not a numeric error.
+# Free-text labels never string-match, so compare structured fields; scope separates a fiscal year from its Q4.
 def _periods_differ(agent_claims: dict, ref_claims: dict) -> bool:
     for field in ("period_end_year", "period_end_month", "period_scope"):
         a, r = agent_claims.get(field), ref_claims.get(field)
@@ -234,8 +224,7 @@ def deterministic_checks(bq, run_record: dict, agent_claims: dict, ref_claims: d
         numeric[metric] = {"agent": agent_claims.get(metric), "reference": ref_claims.get(metric), "result": result}
     checks["numeric"] = numeric
 
-    # Consensus alignment (advice queries). "opposite" is a flag, not a failure — well-argued
-    # divergence is scored by the judge's directional_agreement dimension.
+    # "opposite" is a flag, not a failure — well-argued divergence is scored via directional_agreement.
     agent_rec = None
     if isinstance(run_record.get("agent_output"), dict):
         agent_rec = run_record["agent_output"].get("recommendation")
