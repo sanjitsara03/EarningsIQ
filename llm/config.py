@@ -18,44 +18,46 @@ class AgentLLMConfig:
 # Risk scoring pins the first-party OpenAI provider with fallbacks disabled.
 AGENT_MODELS: dict[str, AgentLLMConfig] = {
     "orchestrator": AgentLLMConfig(
-        model="google/gemini-3-flash-preview",
+        model="google/gemini-3.7-flash",
         max_tokens=1024,
         provider={"require_parameters": True},
     ),
     "web_search": AgentLLMConfig(
-        model="google/gemini-3-flash-preview",
+        model="google/gemini-3.7-flash",
         max_tokens=1024,
     ),
     "extraction": AgentLLMConfig(
-        model="google/gemini-3-flash-preview",
+        model="google/gemini-3.7-flash",
         max_tokens=8192,
         provider={"require_parameters": True},
     ),
     "risk_scoring": AgentLLMConfig(
-        model="openai/gpt-5.2",
+        model="openai/gpt-5.6-terra",
         max_tokens=8192,  # includes reasoning tokens
         provider={"order": ["openai"], "allow_fallbacks": False, "require_parameters": True},
         extra={"reasoning": {"effort": "low"}},
     ),
     "comparison": AgentLLMConfig(
-        model="anthropic/claude-sonnet-4.6",
-        max_tokens=4096,
-        provider={"require_parameters": True},
-    ),
-    "advice": AgentLLMConfig(
-        model="anthropic/claude-sonnet-4.6",
-        max_tokens=1024,
-        provider={"require_parameters": True},
-    ),
-    # Benchmark roles; the judge is a different model family than the sonnet-written outputs it grades.
-    "benchmark_judge": AgentLLMConfig(
-        model="openai/gpt-5.2",
+        model="openai/gpt-5.6-terra",
         max_tokens=8192,  # includes reasoning tokens
         provider={"order": ["openai"], "allow_fallbacks": False, "require_parameters": True},
         extra={"reasoning": {"effort": "low"}},
     ),
+    "advice": AgentLLMConfig(
+        model="openai/gpt-5.6-terra",
+        max_tokens=4096,  # includes reasoning tokens
+        provider={"order": ["openai"], "allow_fallbacks": False, "require_parameters": True},
+        extra={"reasoning": {"effort": "low"}},
+    ),
+    # Benchmark roles; the judge is a different model family than the gpt-5.6-terra outputs it grades.
+    # (sonnet-5 was tried first but stopped honoring strict json_schema via OpenRouter — 0/3 on 2026-08-16.)
+    "benchmark_judge": AgentLLMConfig(
+        model="google/gemini-3.1-pro-preview",
+        max_tokens=8192,
+        provider={"require_parameters": True},
+    ),
     "benchmark_extractor": AgentLLMConfig(
-        model="google/gemini-3-flash-preview",
+        model="google/gemini-3.7-flash",
         max_tokens=1024,
         provider={"require_parameters": True},
     ),

@@ -168,7 +168,7 @@ const EXAMPLES = [
   'How did Apple do last quarter?',
   "What are NVIDIA's biggest risks?",
   'Should I buy Microsoft stock?',
-  'Compare Amazon and Google margins',
+  "How has Microsoft's revenue changed year over year?",
 ]
 
 const ANALYZING_STEPS = [

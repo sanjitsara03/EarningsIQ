@@ -10,19 +10,19 @@ Seven agents, each with a distinct role and loop style:
 
 | Agent | Model (via OpenRouter) | Pattern |
 |---|---|---|
-| Orchestrator | gemini-3-flash-preview | Single LLM call → strict-schema intent JSON |
+| Orchestrator | gemini-3.7-flash | Single LLM call → strict-schema intent JSON |
 | Scraper | No LLM | Deterministic SEC EDGAR client |
-| Extraction | gemini-3-flash-preview | Tool-collection loop — all 5 tools must fire |
-| Risk Scoring | gpt-5.2 (pinned to OpenAI first-party) | Strict ordered loop — named forced tool per step |
-| Comparison | claude-sonnet-4.6 | Open-ended loop, exits on terminal tool |
-| Web Search | gemini-3-flash-preview | Standard tool loop (Tavily) |
-| Advice | claude-sonnet-4.6 | No tools — pure synthesis, Pydantic output |
+| Extraction | gemini-3.7-flash | Tool-collection loop — all 5 tools must fire |
+| Risk Scoring | gpt-5.6-terra (pinned to OpenAI first-party) | Strict ordered loop — named forced tool per step |
+| Comparison | gpt-5.6-terra | Open-ended loop, exits on terminal tool |
+| Web Search | gemini-3.7-flash | Standard tool loop (Tavily) |
+| Advice | gpt-5.6-terra | No tools — pure synthesis, Pydantic output |
 
 Models are routed per-agent through OpenRouter: budget models where the capability requirements are easy, frontier models where correctness is hardest. Three eval tiers guard the system:
 
 1. **Capability harness** (`evals/capability_harness.py`) — can the models do the mechanics? Probes each model+provider pair for named forced tool choice, parallel tool calls, and strict structured outputs. Provider capability drifts, so it re-runs before demos and deploys.
 2. **Promptfoo evals** (`evals/*_eval.yaml`) — do the agents meet their contracts? Per-agent assertions on routing, schemas, and output shape.
-3. **Analyst benchmark** (`evals/analyst_benchmark.py`) — is the analysis actually good? Runs the real pipeline over 12 diverse queries, gathers fresh professional research per query (Tavily), then scores the output with deterministic numeric cross-checks plus a cross-family LLM judge (gpt-5.2 grades the sonnet-written analysis) on factual accuracy, coverage, grounding, and directional agreement. `uv run python -m evals.analyst_benchmark`; use `--frozen-research <snapshot>` for agent-regression comparisons where reference drift is pinned out.
+3. **Analyst benchmark** (`evals/analyst_benchmark.py`) — is the analysis actually good? Runs the real pipeline over 12 diverse queries, gathers fresh professional research per query (Tavily), then scores the output with deterministic numeric cross-checks plus a cross-family LLM judge (gemini-3.1-pro grades the gpt-5.6-terra-written analysis) on factual accuracy, coverage, grounding, and directional agreement. `uv run python -m evals.analyst_benchmark`; use `--frozen-research <snapshot>` for agent-regression comparisons where reference drift is pinned out.
 
 **Orchestrator** classifies intent (`single_analysis`, `comparison`, `advice`, `web_only`), selects filing type (`10-Q` vs `10-K` vs both), and determines how many periods are needed — one LLM call with strict `json_schema` structured outputs, validated by Pydantic.
 
